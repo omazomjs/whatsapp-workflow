@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel WhatsApp Workflow</title>
+  <link rel="stylesheet" href="estilos.css" />
+</head>
+<body>
+  <div id="pantallaLogin" class="login-wrap">
+    <form id="formLogin" class="login-caja">
+      <h1>Panel WhatsApp</h1>
+      <input type="password" id="clave" placeholder="Contraseña" autocomplete="current-password" required />
+      <button type="submit">Entrar</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </div>
+
+  <div id="pantallaApp" hidden>
+    <header>
+      <h1>Panel WhatsApp Workflow</h1>
+      <nav>
+        <button data-vista="cola">Cola de envíos</button>
+        <button data-vista="dashboard">Dashboard</button>
+        <button data-vista="contactos">Contactos</button>
+        <button id="btnSalir">Salir</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- VISTA COLA -->
+      <section id="vista-cola" class="vista">
+        <div class="filtros">
+          <select id="fEstado">
+            <option value="ALL">Todos los estados</option>
+            <option>PENDING</option>
+            <option>SENDING</option>
+            <option>SENT</option>
+            <option>FAILED</option>
+          </select>
+          <input type="date" id="fDesde" />
+          <input type="date" id="fHasta" />
+          <input type="text" id="fTelefono" placeholder="Teléfono…" />
+          <input type="text" id="fBuscar" placeholder="Buscar en mensaje…" />
+          <button id="btnAplicar">Aplicar</button>
+          <button id="btnCsv">Exportar CSV</button>
+          <span id="colaLote"></span>
+        </div>
+        <div class="tabla-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Id</th>
+                <th>Fecha</th>
+                <th>Teléfono</th>
+                <th>Estado</th>
+                <th>Rtr</th>
+                <th>Mensaje</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="colaLlaves"></tbody>
+          </table>
+        </div>
+        <div class="paginacion">
+          <button id="btnAnt" disabled>← Anterior</button>
+          <span id="colaTotal"></span>
+          <button id="btnSig" disabled>Siguiente →</button>
+        </div>
+      </section>
+
+      <!-- VISTA DASHBOARD -->
+      <section id="vista-dashboard" class="vista" hidden>
+        <div class="tarjetas" id="tarjetas"></div>
+        <div class="panel-salud" id="panelSalud"></div>
+        <h2>Envíos últimos 14 días</h2>
+        <canvas id="grafico" width="900" height="260"></canvas>
+      </section>
+
+      <!-- VISTA CONTACTOS -->
+      <section id="vista-contactos" class="vista" hidden>
+        <form id="formContacto" class="contacto-form">
+          <input type="hidden" id="cId" />
+          <input type="text" id="cNombre" placeholder="Nombre *" required />
+          <input type="tel" id="cTelefono" placeholder="Teléfono (660 400 537)*" required />
+          <label><input type="checkbox" id="cResumen" /> Destinatario del resumen</label>
+          <input type="text" id="cNotas" placeholder="Notas…" />
+          <label><input type="checkbox" id="cActivo" checked /> Activo</label>
+          <button type="submit" id="cGuardar">Añadir</button>
+          <button type="button" id="cCancelar" hidden>Cancelar</button>
+        </form>
+        <div class="tabla-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Resumen</th>
+                <th>Activo</th>
+                <th>Notas</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="contactosLlaves"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-caja">
+      <h3 id="modalTitulo"></h3>
+      <pre id="modalCuerpo"></pre>
+      <button id="modalCerrar">Cerrar</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

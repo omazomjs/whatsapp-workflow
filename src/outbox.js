@@ -1,4 +1,4 @@
-import { fetchPending, markSent, markFailed } from './database.js';
+import { fetchPending, setSending, markSent, markFailed } from './database.js';
 import { config } from '../config.js';
 
 export async function processOutbox(client) {
@@ -21,6 +21,7 @@ export async function processOutbox(client) {
     }
 
     try {
+      await setSending(row.Id);
       await client.sendMessage(`${number}@c.us`, row.Message);
       await markSent(row.Id);
       console.log(`[Enviado] id=${row.Id} -> ${number}`);
@@ -33,5 +34,7 @@ export async function processOutbox(client) {
 
 export function normalizeNumber(phone) {
   const digits = String(phone ?? '').replace(/\D/g, '');
-  return digits.startsWith('00') ? digits.slice(2) : digits;
+  if (digits.startsWith('00')) return digits.slice(2);
+  if (digits.length === 9 && /^[67]/.test(digits)) return `34${digits}`;
+  return digits;
 }

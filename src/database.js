@@ -23,13 +23,23 @@ export async function closePool() {
 export async function fetchPending(batchSize, outboxTable) {
   const table = safeTableName(outboxTable);
   const pool = await getPool();
-  const result = await pool.request().query(
-    `SELECT TOP (${Number(batchSize)}) Id, Phone, Message
-       FROM dbo.${table}
-      WHERE Status = 'PENDING'
-      ORDER BY Id ASC`
-  );
+  const result = await pool
+    .request()
+    .input('MaxRetry', sql.Int, config.polling.maxRetry)
+    .input('StaleMinutes', sql.Int, config.polling.staleMinutes)
+    .query(
+      `SELECT TOP (${Number(batchSize)}) Id, Phone, Message, RetryCount
+         FROM dbo.${table}
+        WHERE Status = 'PENDING'
+           OR (Status = 'SENDING' AND ProcessedAt <= DATEADD(MINUTE, -@StaleMinutes, SYSDATETIME()))
+           OR (Status = 'FAILED' AND RetryCount < @MaxRetry)
+        ORDER BY Id ASC`
+    );
   return result.recordset ?? [];
+}
+
+export async function setSending(id) {
+  await runUpdate(id, 'SENDING', null);
 }
 
 export async function markSent(id) {
@@ -49,7 +59,10 @@ async function runUpdate(id, status, error) {
     .input('Error', sql.NVarChar(sql.MAX), error);
   await request.query(
     `UPDATE dbo.${safeTableName(config.polling.outboxTable)}
-        SET Status = @Status, Error = @Error, ProcessedAt = SYSDATETIME()
+        SET Status = @Status,
+            Error = @Error,
+            ProcessedAt = SYSDATETIME(),
+            RetryCount = CASE WHEN @Status = 'FAILED' THEN RetryCount + 1 ELSE RetryCount END
       WHERE Id = @Id`
   );
 }

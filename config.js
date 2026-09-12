@@ -17,6 +17,8 @@ export const config = {
     intervalMs: Number(process.env.POLL_INTERVAL_MS ?? 30000),
     batchSize: Number(process.env.BATCH_SIZE ?? 5),
     outboxTable: process.env.OUTBOX_TABLE ?? 'WhatsAppOutbox',
+    maxRetry: Number(process.env.OUTBOX_MAX_RETRY ?? 3),
+    staleMinutes: Number(process.env.OUTBOX_STALE_MINUTES ?? 2),
   },
   source: {
     enabled: (process.env.SRC_ENABLED ?? 'false') === 'true',
@@ -35,11 +37,21 @@ export const config = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    catchupDays: Number(process.env.RESUMEN_CATCHUP_DAYS ?? 7),
   },
   whatsapp: {
     sessionDir: process.env.WA_SESSION_DIR ?? 'sessions',
     chromePath: process.env.WA_CHROME_PATH,
     qrPort: Number(process.env.WA_QR_PORT ?? 0),
+  },
+  web: {
+    port: Number(process.env.WEB_PORT ?? 3000),
+    user: process.env.WEB_USER ?? '',
+    password: process.env.WEB_PASSWORD ?? '',
+    sessionSecret: process.env.WEB_SESSION_SECRET ?? '',
+    tlsCert: process.env.WEB_SSL_CERT ?? '',
+    tlsKey: process.env.WEB_SSL_KEY ?? '',
+    httpsPort: Number(process.env.WEB_HTTPS_PORT ?? 3443),
   },
 };
 

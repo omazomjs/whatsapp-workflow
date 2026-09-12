@@ -3,7 +3,7 @@ import { promptPassword } from './prompt.js';
 import { ingestSource } from './ingest.js';
 import { maybeEnviarResumen } from './resumen.js';
 import { processOutbox } from './outbox.js';
-import { closePool } from './database.js';
+import { closePool, setState } from './database.js';
 import { config } from '../config.js';
 
 let timer = null;
@@ -27,9 +27,15 @@ async function tick(client) {
   } catch (err) {
     console.error('[Workflow] Error al procesar la cola:', err.message);
   }
+  try {
+    await setState('lastTickAt', new Date().toISOString());
+  } catch (err) {
+    console.error('[Workflow] No se pudo guardar el latido:', err.message);
+  }
 }
 
 function startPolling(client) {
+  if (timer) clearInterval(timer);
   console.log(
     `[Workflow] Ciclo cada ${config.polling.intervalMs / 1000}s: lee fuente -> cola -> envia`
   );
@@ -64,13 +70,14 @@ async function main() {
 
 main();
 
-process.on('SIGINT', async () => {
+async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log('\n[Workflow] Deteniendo...');
   if (timer) clearInterval(timer);
   await closePool();
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

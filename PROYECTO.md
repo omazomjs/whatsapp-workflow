@@ -9,6 +9,16 @@ Automatizar (presupuesto 0) el envío de un **resumen diario de facturas por Wha
 El worker lee la BD de gestión (`REFact`), genera el resumen del día a las **23:00** y lo envía al
 móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 
+## Bitácora
+
+- **12/09 — Casa (VPN a oficina)**:
+  - `wa_bot` tiene ahora clave compleja (la puso el usuario) con permisos mínimos: `db_owner` SOLO `GesMensajeria` + `db_datareader` `REFact`. Nunca quedó escrita en archivos ni en el chat.
+  - Migración aplicada con `npm run migrar` (2/2: `RetryCount` + tabla `WhatsAppContactos`), usando solo `wa_bot`, sin `sa`.
+  - Panel web probado contra la BD real por VPN: **11/11 controles OK** (`npm run test-panel`). Corregido bug en `/api/stats` (en `web/server.js`, destructuración con 3 consultas y 4 nombres -> "estadoInfo is not defined").
+  - Corregido bug de CSS: el `display:flex` de `.modal` anulaba `hidden` (ventana blanca imposible de cerrar). Añadida regla global `[hidden]{display:none!important}` en `web/public/estilos.css`.
+  - Añadida a la agenda de contactos (tabla `WhatsAppContactos`): **Itxaso Saiz Herrero** `34 660 400 509`, marcada `EsResumen=1`.
+  - **Pendiente para enviarle el resumen real**: añadir `34660400509` a `RESUMEN_RECIPIENTS` del `.env` del SERVIDOR y reiniciar la tarea `WhatsAppWorkflow` (pasos en `INSTRUCCIONES_OFICINA.md`) y, cuando se desee, que el worker lea destinos desde `WhatsAppContactos` en vez de `.env`.
+
 ## Cómo funciona
 
 - **Worker Node.js** (`whatsapp-web.js`) que se conecta a WhatsApp Web con una sesión guardada (LocalAuth).
@@ -17,7 +27,7 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
   2. `resumen` diario a las 23:00 (una vez/día) → cola.
   3. `outbox`: envía los mensajes pendientes por WhatsApp.
 - Cola y estado viven en la BD `GesMensajeria`:
-  - `WhatsAppOutbox` (Id, Phone, Message, Status PENDING/SENT/FAILED, CreatedAt, ProcessedAt, Error).
+  - `WhatsAppOutbox` (Id, Phone, Message, Status PENDING/SENDING/SENT/FAILED, RetryCount, CreatedAt, ProcessedAt, Error).
   - `WhatsAppState` (KeyName, Value, UpdatedAt; clave `lastResumenDate` = día ya enviado).
 
 ## Infraestructura
@@ -61,6 +71,8 @@ DB_TRUST_CERT=true
 OUTBOX_TABLE=WhatsAppOutbox
 POLL_INTERVAL_MS=30000
 BATCH_SIZE=5
+OUTBOX_MAX_RETRY=3        # reintentos de FAILED; al superarlos queda FAILED definitivo
+OUTBOX_STALE_MINUTES=2    # una fila en SENDING mas antigua de X min se reprocesa (proceso caido)
 
 SRC_ENABLED=false
 SRC_DATABASE=REFact
@@ -74,10 +86,34 @@ RESUMEN_ENABLED=true
 RESUMEN_HORA=23
 RESUMEN_MINUTO=0
 RESUMEN_RECIPIENTS=34660400537
+RESUMEN_CATCHUP_DAYS=7    # al volver, recupera dias perdidos (solo con movimientos)
 
 WA_CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 WA_QR_PORT=8080
+
+# Panel web (opcional): WEB_PASSWORD la pone el usuario en cada instalacion
+WEB_PORT=3000
+WEB_USER=
+WEB_PASSWORD=
+WEB_SESSION_SECRET=
+# HTTPS con cert de la CA de empresa (XCA): si se rellenan rutas, panel en WEB_HTTPS_PORT
+WEB_SSL_CERT=
+WEB_SSL_KEY=
+WEB_HTTPS_PORT=3443
 ```
+
+## Panel web (dashboard)
+
+Interfaz SPA (sin dependencias externas) para ver y gestionar los datos de `GesMensajeria`:
+
+- **Cola de envíos** (`WhatsAppOutbox`): filtros por estado/fecha/teléfono/contenido, paginación, detalle del mensaje (incluye `Error` y `RetryCount`), botón **Reintentar**, exportación CSV.
+- **Dashboard**: contadores por estado, gráfico de envíos/fallos de los últimos 14 días (canvas) y **salud del worker** (latido `lastTickAt` de `WhatsAppState` + último resumen).
+- **Contactos** (`WhatsAppContactos`): CRUD de destinatarios (nombre, teléfono normalizado a formato internacional, `EsResumen`, `Activo`, notas).
+- **Login**: sesión con cookie `httpOnly`, contraseña y usuario en `.env` (`WEB_PASSWORD`/`WEB_USER`), límite de intentos por IP.
+
+- Arranque: `npm run web` (`web/server.js`, Express, puerto `WEB_PORT`). Sin certificado sirve por HTTP; con `WEB_SSL_CERT`/`WEB_SSL_KEY` sirve por HTTPS en `WEB_HTTPS_PORT` (cookies `secure` y HSTS automáticos).
+- Las consultas a BD van siempre parametrizadas (mssql). No se ejecuta ningún SQL dinámico con datos del usuario (solo `safeTableName` para el nombre de tabla).
+- Debe correr solo en la red/VPN corporativa y con `WEB_PASSWORD` fuerte.
 
 ## Mensaje diario (23:00)
 
@@ -103,6 +139,8 @@ ELIMINADAS: 2
 
 En el PC de trabajo (carpeta del proyecto):
 - `npm run check` → valida sintaxis de todos los JS.
+- `npm run web` → arranca el panel web (dashboard) en el puerto `WEB_PORT`.
+- `npm run migrar` → aplica las migraciones pendientes de GesMensajeria con las credenciales de `wa_bot` (no usa `sa`). Idempotente.
 - `npm run test-resumen` → genera el resumen de HOY, lo imprime y lo encola para el móvil.
 - `npm run test-resumen -- --fecha 2026-09-11` → lo mismo para un día concreto (YYYY-MM-DD).
 - `powershell -ExecutionPolicy Bypass -File .\test_envio.ps1` → prueba genérica (inserta un aviso en la cola; pide clave de `sa` enmascarada). OJO: corre SOLO en el PC de trabajo de `C:\Users\omazo`.
@@ -131,10 +169,23 @@ En el servidor:
 - **En producción**: worker corriendo 24/7 en el servidor, sesión WhatsApp vinculada, resumen 23:00 automático.
 - Despliegue manual: `Z:\whatsapp-workflow.zip` (o copia directa a `Z:\whatsapp-workflow`).
 - Pendiente/impedido: nada. `SRC_ENABLED=false` (ingest en tiempo real codificado pero apagado).
+- **En desarrollo (casa, VPN)**: worker robustecido (reconexión sin duplicar ciclos, estado `SENDING` + reintentos con límite, teléfonos de 9 dígitos con prefijo 34, catch-up de días perdidos, latido `lastTickAt`) y **panel web** construido (cola+logs, dashboard, contactos, CSV, login, HTTPS-ready). No desplegado aún en el servidor.
+- **Validado por VPN (12/09)** : migración `npm run migrar` aplicada (2/2: `RetryCount` + `WhatsAppContactos`); panel conectado a la BD real con 11/11 controles OK (`npm run test-panel`). Corregido bug de `/api/stats` (destructuración con 4 nombres y 3 consultas -> "estadoInfo is not defined").
+
+## Próximos pasos
+
+1. **Desplegar panel en el servidor** (`192.168.1.223`): copiar `web/` + dependencias, tarea de Windows para `npm run web` (o mismo `start.cmd`), puerto 3000/3443 solo LAN. En el servidor hay que poner `WEB_PASSWORD`/`WEB_SESSION_SECRET` en su `.env` (el `wa_bot` ya está creado con clave compleja).
+2. **HTTPS con XCA (CA de empresa)**: generar con XCA un certificado del servidor con SANs `localhost` + IP LAN; el panel lo carga con `WEB_SSL_CERT`/`WEB_SSL_KEY` (puerto 3443). Instalar la raíz de empresa en los clientes (o GPO) para que el candado salga verde.
 
 ## Seguridad
 
+- **Alcance de `wa_bot` (mínimo por diseño)**: `db_owner` SOLO en `GesMensajeria` y `db_datareader` (solo lectura) en `REFact`. Sin roles de servidor (ni sysadmin), sin acceso a otras BD, archivos ni configuración. El panel web solo consulta `GesMensajeria`, así que con esto basta.
+- Las migraciones se aplican con `npm run migrar` usando las credenciales de `wa_bot`; **no hace falta `sa`** para operar (solo para instalación inicial).
 - Claves SQL (`sa`, `wa_bot`) nunca en archivos versionables; `sa` solo se pide por teclado enmascarada.
+- El login `wa_bot` se crea/actualiza con `sql/crear_wa_bot.ps1` (pide las claves enmascaradas, sin dejarlas en archivos); `setup_gesmensajeria.sql` ya NO lleva clave escrita.
 - `DB_PASSWORD` de `wa_bot` va en `.env` del servidor (exigencia del modo servicio).
+- **Política de contraseñas**: solo las introduce el usuario de viva voz/tecleadas por él; las herramientas y asistentes solo indican qué falta.
+- **A nivel de Windows**: la tarea `WhatsAppWorkflow` corre por defecto como SYSTEM (controla todo el servidor). Para menor superficie, `instalar_servicio.ps1` acepta `-Cuenta ".\wa_serv" -Password ...` con una cuenta local sin privilegios (dándole solo acceso a `C:\Instaladores\whatsapp-workflow`), o `-Cuenta "NT AUTHORITY\NETWORK SERVICE"`.
+- El panel se sirve desnudo (HTTP) solo en LAN/VPN; para producción se debe usar HTTPS con el certificado de la CA de la empresa (XCA).
 - No incluir `.env` en git ni en el zip; el zip/despliegue solo lleva `.env.example`.
 - El móvil de empresa quedará vinculado a la sesión; si se desvincula, re-escaneo en `http://IP-DEL-SERVIDOR:8080/qr.png`.

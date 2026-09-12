@@ -7,10 +7,15 @@
   "scripts": {
     "start": "node src/index.js",
     "test-resumen": "node src/test-resumen.js",
-    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/database.js && node --check src/outbox.js && node --check src/ingest.js && node --check src/resumen.js && node --check src/prompt.js && node --check src/test-resumen.js && node --check config.js"
+    "test-panel": "node src/test-panel.js",
+    "migrar": "node src/migrar.js",
+    "web": "node web/server.js",
+    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/database.js && node --check src/outbox.js && node --check src/ingest.js && node --check src/resumen.js && node --check src/prompt.js && node --check src/test-resumen.js && node --check src/migrar.js && node --check config.js && node --check web/server.js"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "mssql": "^11.0.1",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.26.1-alpha.0"
