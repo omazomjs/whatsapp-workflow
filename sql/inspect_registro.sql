@@ -1,0 +1,22 @@
+SET NOCOUNT ON;
+PRINT '=== ESTRUCTURA DE dbo.Registro ===';
+SELECT ORDINAL_POSITION AS Pos,
+       COLUMN_NAME                 AS Columna,
+       DATA_TYPE +
+         ISNULL('(' + CAST(CHARACTER_MAXIMUM_LENGTH AS VARCHAR(10)) + ')', '') AS Tipo,
+       IS_NULLABLE                 AS Nula
+  FROM INFORMATION_SCHEMA.COLUMNS
+ WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Registro'
+ ORDER BY ORDINAL_POSITION;
+
+PRINT '';
+PRINT '=== NUMERO TOTAL DE FILAS ===';
+SELECT COUNT(*) AS TotalFilas FROM dbo.[Registro];
+
+PRINT '';
+PRINT '=== MUESTRA: PRIMERAS 20 FILAS ===';
+SELECT TOP (20) * FROM dbo.[Registro];
+
+PRINT '';
+PRINT '=== MUESTRA: 20 FILAS MAS RECIENTES (por 1a columna) ===';
+SELECT TOP (20) * FROM dbo.[Registro] ORDER BY 1 DESC;

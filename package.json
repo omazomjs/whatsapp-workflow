@@ -1,0 +1,18 @@
+{
+  "name": "whatsapp-workflow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker que envia mensajes de WhatsApp cuando entran datos en SQL Server",
+  "scripts": {
+    "start": "node src/index.js",
+    "test-resumen": "node src/test-resumen.js",
+    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/database.js && node --check src/outbox.js && node --check src/ingest.js && node --check src/resumen.js && node --check src/prompt.js && node --check src/test-resumen.js && node --check config.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "mssql": "^11.0.1",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.1-alpha.0"
+  }
+}
