@@ -11,6 +11,18 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 
 ## Bitácora
 
+- **14/09 — Oficina (servidor 192.168.1.223)**:
+  - Resuelto el `[DB] Error de inicio de sesión del usuario 'wa_bot'` del worker: el `.env` del servidor seguía con la clave antigua (se cambió en casa). Puesta la clave real y reiniciada la tarea `WhatsAppWorkflow`. Log OK (`Sesion lista.` sin errores de BD).
+  - `RESUMEN_RECIPIENTS=34660400537,34660400509` en el `.env` del servidor; `npm run test-resumen -- --fecha 2026-09-13` enviado a los 2 móviles (outbox id 6 → 34660400537, id 7 → **34660400509**). **Itxaso recibe el resumen.** ✔
+  - **Panel web desplegado en producción con HTTPS** (cert de MJS CA / XCA):
+    - Hostname confirmado: `192.168.1.223` = **`INFOSERVER07.maderas.local`**.
+    - Certificado `certs\server.crt` + `certs\server.key` (PEM sin passphrase) firmado por **MJS Autoridad Certificadora**, CN=INFOSERVER07.maderas.local, SAN `DNS:INFOSERVER07.maderas.local` + `IP:192.168.1.223`, BasicConstraints entidad final, SKI+AKI, validez 5 años (14/09/2026 → 14/09/2031).
+    - `.env` servidor: añadidas `WEB_SSL_CERT`/`WEB_SSL_KEY`/`WEB_HTTPS_PORT=3443` sin tocar el resto; `WEB_PASSWORD`/`WEB_SESSION_SECRET` ya estaban (puestas por el usuario).
+    - Tarea **`WhatsAppWeb`** (`instalar_web.ps1` → `startweb.cmd` → `node web\server.js >> logs\web.log`), SYSTEM, ONSTART. Firewall abierto TCP 3443. `server.key` con ACL solo `SYSTEM`+`Administrators`.
+    - Verificado desde la oficina: `https://INFOSERVER07.maderas.local:3443/api/health` → 200, y por IP `https://192.168.1.223:3443` → 200 **sin avisos de certificado** (las PCs de oficina ya confían en MJS CA).
+    - Lección: el `.env` apunta a `server.key` exactamente; si el export se llama `server.key.pem`, `esTls` queda false y cae a HTTP (3000). Renombrado y reiniciada la tarea web.
+    - Añadidos al repo `startweb.cmd` e `instalar_web.ps1` (pendiente de commit junto a estas notas).
+
 - **12/09 — Casa (VPN a oficina)**:
   - `wa_bot` tiene ahora clave compleja (la puso el usuario) con permisos mínimos: `db_owner` SOLO `GesMensajeria` + `db_datareader` `REFact`. Nunca quedó escrita en archivos ni en el chat.
   - Migración aplicada con `npm run migrar` (2/2: `RetryCount` + tabla `WhatsAppContactos`), usando solo `wa_bot`, sin `sa`.
@@ -33,6 +45,7 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 ## Infraestructura
 
 - **SQL Server**: `192.168.1.212\SQL2008` (SQL 2008; scripts compatibles: sin CONCAT/FORMAT).
+- **Servidor worker/panel**: `192.168.1.223` = `INFOSERVER07.maderas.local` (FQDN interno, resuelto por DNS).
 - **Login worker**: `wa_bot` — `db_owner` en `GesMensajeria` y solo `db_datareader` en `REFact`.
   Contraseña real la puso el usuario; en el código solo hay un `.env.example` con placeholder.
 - **Admin**: usuario `sa` (contraseña nunca va en archivos; se pregunta por teclado enmascarada en los .ps1).
@@ -49,6 +62,11 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 | Unidad mapeada Z: (PC trabajo → servidor) | `Z:\` = `\\192.168.1.223\Instaladores` |
 | Zip de despliegue | `Z:\whatsapp-workflow.zip` (también en Escritorio del PC de trabajo) |
 | Log del worker (servidor) | `C:\Instaladores\whatsapp-workflow\logs\worker.log` |
+| Log del panel web (servidor) | `C:\Instaladores\whatsapp-workflow\logs\web.log` |
+| Certificados HTTPS (servidor) | `C:\Instaladores\whatsapp-workflow\certs` (`server.crt`, `server.key`) |
+| Panel web en producción | `https://INFOSERVER07.maderas.local:3443` (o `https://192.168.1.223:3443`) |
+| Tarea del worker (servidor) | `WhatsAppWorkflow` (schtasks, SYSTEM, ONSTART) |
+| Tarea del panel (servidor) | `WhatsAppWeb` (schtasks, SYSTEM, ONSTART) |
 | Sesión WhatsApp (servidor) | `C:\Instaladores\whatsapp-workflow\sessions\` |
 | QR en vivo (si hace falta vinculación) | `http://IP-DEL-SERVIDOR:8080/qr.png` |
 
@@ -85,7 +103,7 @@ SRC_MESSAGE_TEMPLATE=
 RESUMEN_ENABLED=true
 RESUMEN_HORA=23
 RESUMEN_MINUTO=0
-RESUMEN_RECIPIENTS=34660400537
+RESUMEN_RECIPIENTS=34660400537,34660400509
 RESUMEN_CATCHUP_DAYS=7    # al volver, recupera dias perdidos (solo con movimientos)
 
 WA_CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
@@ -112,6 +130,7 @@ Interfaz SPA (sin dependencias externas) para ver y gestionar los datos de `GesM
 - **Login**: sesión con cookie `httpOnly`, contraseña y usuario en `.env` (`WEB_PASSWORD`/`WEB_USER`), límite de intentos por IP.
 
 - Arranque: `npm run web` (`web/server.js`, Express, puerto `WEB_PORT`). Sin certificado sirve por HTTP; con `WEB_SSL_CERT`/`WEB_SSL_KEY` sirve por HTTPS en `WEB_HTTPS_PORT` (cookies `secure` y HSTS automáticos).
+- **En producción (servidor)**: HTTPS activo en `WEB_HTTPS_PORT=3443` con cert MJS CA; login con `WEB_PASSWORD` que puso el usuario.
 - Las consultas a BD van siempre parametrizadas (mssql). No se ejecuta ningún SQL dinámico con datos del usuario (solo `safeTableName` para el nombre de tabla).
 - Debe correr solo en la red/VPN corporativa y con `WEB_PASSWORD` fuerte.
 
@@ -161,21 +180,26 @@ En el servidor:
   - Arranca con el sistema (`/SC ONSTART`), como **SISTEMA** (sin contraseña ni login).
   - Se reintenta si falla (3 veces cada 2 min).
 - Instalada con `schtasks` (no usar `Register-ScheduledTask -LogonType`, no existe en PowerShell 5.1).
+- **Panel web**: tarea **`WhatsAppWeb`** (`instalar_web.ps1` → `startweb.cmd` → `node web\server.js >> logs\web.log`). Comprobar: `schtasks /Query /TN WhatsAppWeb` y `Get-Content C:\Instaladores\whatsapp-workflow\logs\web.log -Tail 10`.
 - Comprobar: `schtasks /Query /TN WhatsAppWorkflow` y `Get-Content C:\Instaladores\whatsapp-workflow\logs\worker.log -Tail 15`.
-- Log correcto: `[WhatsApp] Sesion lista.` + `[Workflow] Ciclo cada 30s: lee fuente -> cola -> envia`.
+- Log correcto (worker): `[WhatsApp] Sesion lista.` + `[Workflow] Ciclo cada 30s: lee fuente -> cola -> envia`.
+- Log correcto (panel): `[Web] Panel HTTPS en https://localhost:3443`.
 
 ## Estado actual
 
-- **En producción**: worker corriendo 24/7 en el servidor, sesión WhatsApp vinculada, resumen 23:00 automático.
-- Despliegue manual: `Z:\whatsapp-workflow.zip` (o copia directa a `Z:\whatsapp-workflow`).
-- Pendiente/impedido: nada. `SRC_ENABLED=false` (ingest en tiempo real codificado pero apagado).
-- **En desarrollo (casa, VPN)**: worker robustecido (reconexión sin duplicar ciclos, estado `SENDING` + reintentos con límite, teléfonos de 9 dígitos con prefijo 34, catch-up de días perdidos, latido `lastTickAt`) y **panel web** construido (cola+logs, dashboard, contactos, CSV, login, HTTPS-ready). No desplegado aún en el servidor.
-- **Validado por VPN (12/09)** : migración `npm run migrar` aplicada (2/2: `RetryCount` + `WhatsAppContactos`); panel conectado a la BD real con 11/11 controles OK (`npm run test-panel`). Corregido bug de `/api/stats` (destructuración con 4 nombres y 3 consultas -> "estadoInfo is not defined").
+- **EN PRODUCCIÓN**: worker 24/7 (`WhatsAppWorkflow`) + **panel web HTTPS** (`WhatsAppWeb`) en `https://INFOSERVER07.maderas.local:3443`.
+- Resumen 23:00 automático; **destinatarios**: `34660400537` y `34660400509` (Itxaso Saiz Herrero, con `EsResumen=1` en `WhatsAppContactos`).
+- Resumen de `2026-09-13` enviado a los 2 móviles (test-resumen real) — **Itxaso confirmado** ✔
+- Despliegue manual: `Z:\whatsapp-workflow.zip` (o copia directa a `Z:\whatsapp-workflow`), sin sobrescribir `.env`.
+- `SRC_ENABLED=false` (ingest en tiempo real codificado pero apagado).
+- Cert MJS CA: validez 5 años (14/09/2026 → 14/09/2031); renovación antes de esa fecha.
 
 ## Próximos pasos
 
-1. **Desplegar panel en el servidor** (`192.168.1.223`): copiar `web/` + dependencias, tarea de Windows para `npm run web` (o mismo `start.cmd`), puerto 3000/3443 solo LAN. En el servidor hay que poner `WEB_PASSWORD`/`WEB_SESSION_SECRET` en su `.env` (el `wa_bot` ya está creado con clave compleja).
-2. **HTTPS con XCA (CA de empresa)**: generar con XCA un certificado del servidor con SANs `localhost` + IP LAN; el panel lo carga con `WEB_SSL_CERT`/`WEB_SSL_KEY` (puerto 3443). Instalar la raíz de empresa en los clientes (o GPO) para que el candado salga verde.
+1. **Commit del 14/09** con `startweb.cmd`, `instalar_web.ps1` y notas actualizadas; actualizar `INSTRUCCIONES_OFICINA.md` con el panel (URL, login, cómo reiniciar `WhatsAppWeb`).
+2. **Destinos desde `WhatsAppContactos`** (mejora futura): que el worker lea `EsResumen=1` de la tabla en vez de `RESUMEN_RECIPIENTS` del `.env`, así se añaden/quitan destinatarios desde el panel sin tocar el servidor.
+3. **Recordatorio de renovación** del cert MJS CA (antes de 14/09/2031) y posibilidad de automática.
+4. Revisar si `WhatsAppWeb` debe correr con cuenta no-SYSTEM (`NETWORK SERVICE` u otra restringida) para menor superficie.
 
 ## Seguridad
 
@@ -184,6 +208,7 @@ En el servidor:
 - Claves SQL (`sa`, `wa_bot`) nunca en archivos versionables; `sa` solo se pide por teclado enmascarada.
 - El login `wa_bot` se crea/actualiza con `sql/crear_wa_bot.ps1` (pide las claves enmascaradas, sin dejarlas en archivos); `setup_gesmensajeria.sql` ya NO lleva clave escrita.
 - `DB_PASSWORD` de `wa_bot` va en `.env` del servidor (exigencia del modo servicio).
+- `certs\server.key` (clave privada PEM sin cifrar del panel) con ACL restringida a `SYSTEM` + `Administrators`; la copia maestra vive en XCA (protegida por la passphrase de su BD de claves).
 - **Política de contraseñas**: solo las introduce el usuario de viva voz/tecleadas por él; las herramientas y asistentes solo indican qué falta.
 - **A nivel de Windows**: la tarea `WhatsAppWorkflow` corre por defecto como SYSTEM (controla todo el servidor). Para menor superficie, `instalar_servicio.ps1` acepta `-Cuenta ".\wa_serv" -Password ...` con una cuenta local sin privilegios (dándole solo acceso a `C:\Instaladores\whatsapp-workflow`), o `-Cuenta "NT AUTHORITY\NETWORK SERVICE"`.
 - El panel se sirve desnudo (HTTP) solo en LAN/VPN; para producción se debe usar HTTPS con el certificado de la CA de la empresa (XCA).

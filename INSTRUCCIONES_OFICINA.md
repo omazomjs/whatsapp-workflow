@@ -1,41 +1,54 @@
-# INSTRUCCIONES PARA EL ORDENADOR DE LA OFICINA (12/09)
+# INSTRUCCIONES PARA EL ORDENADOR DE LA OFICINA (14/09)
 
-Objetivo: de aquí a las 23:00, **Itxaso Saiz Herrero (34 660 400 509) debe recibir hoy el resumen**.
+Estado: **worker + panel web en producción** en `INFOSERVER07.maderas.local` (192.168.1.223).
 
-## Paso 1 — Editar el `.env` del worker en el servidor
+## Panel web (dashboard de mensajes)
 
-1. Abre el archivo:
-   `C:\Instaladores\whatsapp-workflow\.env`
-2. Busca la línea:
-   ```
-   RESUMEN_RECIPIENTS=34660400537
-   ```
-3. Sustitúyela por (separemos por comas, SIN espacios):
-   ```
-   RESUMEN_RECIPIENTS=34660400537,34660400509
-   ```
-4. Guarda el archivo (Ctrl+S) y ciérralo. **No modifiques ninguna otra línea.**
+- URL: `https://INFOSERVER07.maderas.local:3443` (o `https://192.168.1.223:3443`).
+- El candado sale verde en estas PCs porque ya confían en `MJS Autoridad Certificadora` (XCA).
+- Login: usuario vacío + contraseña (`WEB_PASSWORD`). Si la olvidas, reseterala abajo.
+- Muestra la cola de envíos, el dashboard, los contactos y el estado del worker.
 
-## Paso 2 — Reiniciar el worker
+### Cambiar el password del panel
 
-Abre PowerShell como Administrador y ejecuta:
+En el servidor (o desde aquí apuntando a `Z:`) con permiso de escritura sobre el `.env`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Instaladores\whatsapp-workflow\cambiar_password_panel.ps1
+```
+
+Te pedirá el nuevo password dos veces (enmascarado). Después reinicia el panel:
+
+```powershell
+schtasks /End /TN "WhatsAppWeb"
+schtasks /Run /TN "WhatsAppWeb"
+Get-Content C:\Instaladores\whatsapp-workflow\logs\web.log -Tail 10
+```
+
+Que reiniciar el panel cierra las sesiones abiertas.
+
+## Worker (resumen diario 23:00)
+
+- Destinatarios actuales (en el `.env` del servidor): `RESUMEN_RECIPIENTS=34660400537,34660400509` (Itxaso incluida).
+- Comprobar que está vivo:
+
+```powershell
+Get-Content C:\Instaladores\whatsapp-workflow\logs\worker.log -Tail 15
+```
+
+- Log correcto: `[WhatsApp] Sesion lista.` y `[Workflow] Ciclo cada 30s: lee fuente -> cola -> envia`, sin errores.
+- Reiniciar el worker (p. ej. tras un problema o un cambio de `.env`):
 
 ```powershell
 schtasks /End /TN "WhatsAppWorkflow"
 schtasks /Run /TN "WhatsAppWorkflow"
 ```
 
-## Paso 3 — Comprobar que está vivo
+- A las 23:00 debe aparecer `[Resumen] Resumen del ... encolado para N movil(es)`. Si no, revisar `WhatsAppOutbox` (SQL) o copiar el log.
 
-```powershell
-Get-Content C:\Instaladores\whatsapp-workflow\logs\worker.log -Tail 15
-```
+## Recordatorios
 
-- Si ves líneas tipo `[Polling]`/`[Outbox]` recientes, va bien.
-- El resumen del día se envía a las **23:00**. Para asegurarte de que sale, a esa hora miras el log otra vez; debe decir algo como `[Resumen] Resumen del ... enviado en cola`.
-- Si pasadas las 23:00 no aparece nada en unos minutos, mira `WhatsAppOutbox` en SQL (SELECT top) o avísame a la vuelta con el texto del log.
-
-## Recordatorio
-
-- La clave de `wa_bot` en este `.env` del servidor debe ser **la misma** que la que puso en casa; no la cambies.
-- El panel web NO está desplegado aun en el servidor (se hará en una próxima tanda).
+- El `.env` del servidor es el único sitio con `DB_PASSWORD` y `WEB_PASSWORD`: no lo subas a git ni lo copies a otros sitios.
+- Si cambias `DB_PASSWORD`, debe ser la misma que la del login `wa_bot` en SQL (ver `sql/crear_wa_bot.ps1`).
+- No anotar passwords en notas sueltas; usa un gestor (KeePass) o un lugar bajo llave.
+- Cert del panel: validez hasta 14/09/2031. Renovarlo antes con XCA (mismo procedimiento).
