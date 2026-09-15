@@ -30,6 +30,12 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
   - Corregido bug de CSS: el `display:flex` de `.modal` anulaba `hidden` (ventana blanca imposible de cerrar). Añadida regla global `[hidden]{display:none!important}` en `web/public/estilos.css`.
   - Añadida a la agenda de contactos (tabla `WhatsAppContactos`): **Itxaso Saiz Herrero** `34 660 400 509`, marcada `EsResumen=1`.
   - **Pendiente para enviarle el resumen real**: añadir `34660400509` a `RESUMEN_RECIPIENTS` del `.env` del SERVIDOR y reiniciar la tarea `WhatsAppWorkflow` (pasos en `INSTRUCCIONES_OFICINA.md`) y, cuando se desee, que el worker lea destinos desde `WhatsAppContactos` en vez de `.env`.
+- **13/09 — Casa → servidor desplegado con código nuevo**:
+  - El worker del servidor no escribía latido (código viejo) y el dashboard local decía "caído" con el worker realmente operativo. Resuelto desplegando la versión nueva.
+  - Causa raíz del fallo de despliegue (2 intentos): `Copy-Item` sobre una carpeta destino existente anida (`src\src\...`), dejando el código viejo visible. Solución: `robocopy <src> <dest> /E` (copia contenidos).
+  - Despliegue final: descarga del ZIP público del repo (codeload) en el servidor, `robocopy` de `src/`, `web/`, `config.js`, `package.json` sin tocar `.env` ni `.wwebjs_auth`; `npm install`; reinicio de la tarea `WhatsAppWorkflow`. Verificado: `lastTickAt` en `WhatsAppState` (latido 30 s) y dashboard `worker.vivo=true`.
+  - Sesión de WhatsApp conservada (`LocalAuth` mismo `clientId`), sin reescaneo de QR.
+  - Fue necesario hacer el repo **público** para que el servidor pudiera descargarlo sin credenciales (sin secretos en el repo).
 
 ## Cómo funciona
 
