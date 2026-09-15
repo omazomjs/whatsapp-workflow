@@ -161,3 +161,29 @@ export async function fetchResumenDiario(desde, hasta) {
 
   return { total: totals.recordset[0], porEstado: porEstado.recordset ?? [] };
 }
+
+const CONFIG_TABLE = 'WhatsAppConfig';
+
+export async function getConfig(key, def = null) {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('k', sql.NVarChar, key)
+    .query(`SELECT Value FROM dbo.${CONFIG_TABLE} WHERE Key = @k`);
+  return r.recordset.length ? r.recordset[0].Value : def;
+}
+
+export async function setConfig(key, value) {
+  const pool = await getPool();
+  console.log(`[Config] ${key} = ${String(value)}`);
+  return pool
+    .request()
+    .input('k', sql.NVarChar, key)
+    .input('v', sql.NVarChar, String(value))
+    .query(
+      `IF EXISTS (SELECT 1 FROM dbo.${CONFIG_TABLE} WHERE Key = @k)
+         UPDATE dbo.${CONFIG_TABLE} SET Value = @v WHERE Key = @k
+       ELSE
+         INSERT INTO dbo.${CONFIG_TABLE} (Key, Value) VALUES (@k, @v)`
+    );
+}

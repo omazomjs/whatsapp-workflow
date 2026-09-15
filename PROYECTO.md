@@ -11,6 +11,23 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 
 ## Bitácora
 
+- **14/09 (noche) — Fase 1: Alarmas programadas en el panel**:
+  - Nuevo módulo `src/alarmas.js` (scheduler + evaluadores + CRUD + `probar` + historial).
+    - Tipos: `nueva_factura` (criterios `importeMin`/`importeMax`/`IDEstado`) y `resumen_dia` (acumulado por criterio a una hora).
+    - `DiasSemana` = string de dígitos `0..6` (**0=domingo**, `getDay()` de JS; un día `7` NO existe → validación lo descarta; el default correcto es `0123456` = los 7 días).
+    - Dedupe automático por `DiaProgramado` (máximo 1 envío/día/alarma aunque el worker reinicie).
+    - Al disparar encola en `WhatsAppOutbox` (no llama a WhatsApp directamente) → sin riesgo de saturación ni bloqueo.
+  - Migración (2da ejecución) añade: `WhatsAppAlarmas`, `WhatsAppAlarmaContactos`, `WhatsAppAlarmaEjecuciones` (+ índice). `resumen_dia` se evalúa con `fetchResumenDiario` y `buildMensaje`.
+  - `src/resumen.js`: `buildMensaje(data, desde, { elimInadas = true })` (retrocompatible).
+  - Panel: pestaña **Alarmas** con formulario (tipo, criterios, hora, días, destinatarios, activa), tabla, Editar/Probar/Historial/Borrar. Rutas `/api/alarmas*` y `/api/estados`.
+  - `.env.example`/`config.js`: bloque `alarmas` (`ALARMAS_ENABLED`, `ALARMAS_INTERVAL_S` (chequeo de reloj, minimo 15s), `ALARMAS_HISTORIAL`).
+  - Tests: `npm run check` OK; `npm run test-alarmas` OK (lógica pura y CRUD completo contra BD real; 6 estados en `REFact`).
+  - **Desplegado al servidor solo el panel** (10 archivos: config.js, package.json, .env.example, src/resumen.js, src/alarmas.js, src/migrar.js, web/server.js, web/public/*). **EL WORKER NO SE HA TOCADO** (el `src/index.js` del servidor sigue sin `procesarAlarmas()`): las alarmas NO se disparan solas hasta que toque el worker tras confirmar el resumen de las 23:00.
+  - **Bugs de panel encontrados en producción** y corregidos:
+    - `web/public/app.js` tenía un `});` duplicado (línea ~350) que cerraba la IIFE antes de tiempo → `SyntaxError: Unexpected token '}'` → sin listeners, el login hacía envío GET nativo (URL quedaba en `?`). Corregido y recopiado (`node --check` no cubre `web/public/*.js`; añadirlo al check).
+    - Los **días de la semana no se renderizaban** (faltaba `renderDias()` en `#aDias`). Añadido `renderDias()`/`asegurarDias()`.
+    - La alarma "RESUMEN DIARIO" (resumen antiguo de las 23:00) **no salía en la lista** porque es la.feature clásica del `.env`; ahora aparece como fila virtual.
+  - **Resumen diario configurable desde el panel**: su config pasa a la tabla `WhatsAppConfig` (claves `resumen.enabled/hora/minuto/recipientes`), editable con el botón **Configurar** de la fila virtual. El worker lee de BD con respaldo en `.env` (`leerConfigResumen()` en `src/resumen.js`). `getConfig`/`setConfig` en `src/database.js`. Falta: añadir `WhatsAppConfig` a `migrar.js` y ejecutar `npm run migrar`; reiniciar `WhatsAppWeb`; copiar `database.js`/`resumen.js` al servidor (solo afectará al worker tras reiniciarlo, tras las 23:00).
 - **14/09 — Oficina (servidor 192.168.1.223)**:
   - Resuelto el `[DB] Error de inicio de sesión del usuario 'wa_bot'` del worker: el `.env` del servidor seguía con la clave antigua (se cambió en casa). Puesta la clave real y reiniciada la tarea `WhatsAppWorkflow`. Log OK (`Sesion lista.` sin errores de BD).
   - `RESUMEN_RECIPIENTS=34660400537,34660400509` en el `.env` del servidor; `npm run test-resumen -- --fecha 2026-09-13` enviado a los 2 móviles (outbox id 6 → 34660400537, id 7 → **34660400509**). **Itxaso recibe el resumen.** ✔
@@ -47,6 +64,7 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 - Cola y estado viven en la BD `GesMensajeria`:
   - `WhatsAppOutbox` (Id, Phone, Message, Status PENDING/SENDING/SENT/FAILED, RetryCount, CreatedAt, ProcessedAt, Error).
   - `WhatsAppState` (KeyName, Value, UpdatedAt; clave `lastResumenDate` = día ya enviado).
+  - Fase 1: `WhatsAppAlarmas`, `WhatsAppAlarmaContactos`, `WhatsAppAlarmaEjecuciones` (histórico/dedupe) y `WhatsAppConfig` (parametros editables, ej: resumen).
 
 ## Infraestructura
 
@@ -112,6 +130,11 @@ RESUMEN_MINUTO=0
 RESUMEN_RECIPIENTS=34660400537,34660400509
 RESUMEN_CATCHUP_DAYS=7    # al volver, recupera dias perdidos (solo con movimientos)
 
+# Fase 1 - Alarmas programadas (panel). El intervalo SÓLO revisa el reloj:
+ALARMAS_ENABLED=true
+ALARMAS_INTERVAL_S=60
+ALARMAS_HISTORIAL=200
+
 WA_CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 WA_QR_PORT=8080
 
@@ -133,6 +156,7 @@ Interfaz SPA (sin dependencias externas) para ver y gestionar los datos de `GesM
 - **Cola de envíos** (`WhatsAppOutbox`): filtros por estado/fecha/teléfono/contenido, paginación, detalle del mensaje (incluye `Error` y `RetryCount`), botón **Reintentar**, exportación CSV.
 - **Dashboard**: contadores por estado, gráfico de envíos/fallos de los últimos 14 días (canvas) y **salud del worker** (latido `lastTickAt` de `WhatsAppState` + último resumen).
 - **Contactos** (`WhatsAppContactos`): CRUD de destinatarios (nombre, teléfono normalizado a formato internacional, `EsResumen`, `Activo`, notas).
+- **Alarmas (Fase 1)** (`WhatsAppAlarmas` + `WhatsAppAlarmaContactos` + `WhatsAppAlarmaEjecuciones`): tareas programadas `nueva_factura` / `resumen_dia` con hora, días (0=domingo), destinatarios y criterios; botones Editar/Probar/Historial/Borrar. La fila **RESUMEN DIARIO** (virtual, botón **Configurar**) edita la config clásica del resumen que ahora vive en `WhatsAppConfig` (hora, destinatarios, activa) y la ejecuta el worker.
 - **Login**: sesión con cookie `httpOnly`, contraseña y usuario en `.env` (`WEB_PASSWORD`/`WEB_USER`), límite de intentos por IP.
 
 - Arranque: `npm run web` (`web/server.js`, Express, puerto `WEB_PORT`). Sin certificado sirve por HTTP; con `WEB_SSL_CERT`/`WEB_SSL_KEY` sirve por HTTPS en `WEB_HTTPS_PORT` (cookies `secure` y HSTS automáticos).
@@ -168,6 +192,7 @@ En el PC de trabajo (carpeta del proyecto):
 - `npm run migrar` → aplica las migraciones pendientes de GesMensajeria con las credenciales de `wa_bot` (no usa `sa`). Idempotente.
 - `npm run test-resumen` → genera el resumen de HOY, lo imprime y lo encola para el móvil.
 - `npm run test-resumen -- --fecha 2026-09-11` → lo mismo para un día concreto (YYYY-MM-DD).
+- `npm run test-alarmas` → smoke test de alarmas (sin BD) o CRUD completo contra BD real si hay `DB_PASSWORD`.
 - `powershell -ExecutionPolicy Bypass -File .\test_envio.ps1` → prueba genérica (inserta un aviso en la cola; pide clave de `sa` enmascarada). OJO: corre SOLO en el PC de trabajo de `C:\Users\omazo`.
 - `powershell -ExecutionPolicy Bypass -File .\preview_REFact.ps1` → vista previa del resumen del día en SQL.
 - `powershell -ExecutionPolicy Bypass -File .\run_setup.ps1` → instalación inicial SQL (ya ejecutada).
@@ -196,16 +221,20 @@ En el servidor:
 - **EN PRODUCCIÓN**: worker 24/7 (`WhatsAppWorkflow`) + **panel web HTTPS** (`WhatsAppWeb`) en `https://INFOSERVER07.maderas.local:3443`.
 - Resumen 23:00 automático; **destinatarios**: `34660400537` y `34660400509` (Itxaso Saiz Herrero, con `EsResumen=1` en `WhatsAppContactos`).
 - Resumen de `2026-09-13` enviado a los 2 móviles (test-resumen real) — **Itxaso confirmado** ✔
+- **Fase 1 de alarmas EN EL PANEL**: pestaña Alarmas funcionando en producción (CRUD, Probar con `SIN_DATOS` verificado vía API, historial registrándose). **El WORKER del servidor aún NO corre alarmas** (se activa tras confirmar el resumen de las 23:00 de hoy).
+- **Resumen diario configurable**: pendiente de rematar (tabla `WhatsAppConfig` + migrar + reiniciar panel + copiar `database.js`/`resumen.js` a `Z:`).
 - Despliegue manual: `Z:\whatsapp-workflow.zip` (o copia directa a `Z:\whatsapp-workflow`), sin sobrescribir `.env`.
 - `SRC_ENABLED=false` (ingest en tiempo real codificado pero apagado).
 - Cert MJS CA: validez 5 años (14/09/2026 → 14/09/2031); renovación antes de esa fecha.
 
 ## Próximos pasos
 
-1. **Commit del 14/09** con `startweb.cmd`, `instalar_web.ps1` y notas actualizadas; actualizar `INSTRUCCIONES_OFICINA.md` con el panel (URL, login, cómo reiniciar `WhatsAppWeb`).
-2. **Destinos desde `WhatsAppContactos`** (mejora futura): que el worker lea `EsResumen=1` de la tabla en vez de `RESUMEN_RECIPIENTS` del `.env`, así se añaden/quitan destinatarios desde el panel sin tocar el servidor.
-3. **Recordatorio de renovación** del cert MJS CA (antes de 14/09/2031) y posibilidad de automática.
-4. Revisar si `WhatsAppWeb` debe correr con cuenta no-SYSTEM (`NETWORK SERVICE` u otra restringida) para menor superficie.
+1. **Rematar resumen configurable**: `npm run migrar` (crea `WhatsAppConfig`) → copiar `web/server.js`, `web/public/app.js`, `src/database.js`, `src/resumen.js` y `src/migrar.js` a `Z:\whatsapp-workflow` → reiniciar `WhatsAppWeb` → verificar PUT/GET `/api/config/resumen` y el botón **Configurar**.
+2. **Confirmar el resumen de las 23:00 de hoy** en `logs\worker.log` (`[Resumen] Resumen del 2026-09-14 ...` con envíos a los 2 móviles). Solo después: copiar `src/index.js` (integración `procesarAlarmas()`) a `Z:\whatsapp-workflow` y reiniciar la tarea `WhatsApp` → las alarmas pasan a dispararse solas.
+3. **Commit del 14/09** (Fase 1 + resumen configurable + fixes): `src/alarmas.js`, `src/migrar.js`, `src/resumen.js`, `src/database.js`, `web/server.js`, `web/public/*`, `config.js`, `package.json`, `.env.example`, `startweb.cmd`, `instalar_web.ps1`, `INSTRUCCIONES_OFICINA.md` y `PROYECTO.md`. Revisar que `web/public/app.js` e `index.html` se añadan al script `check`.
+4. **Destinos desde `WhatsAppContactos`** (mejora futura): que el worker lea `EsResumen=1` de la tabla en vez de `RESUMEN_RECIPIENTS` (ahora la config editable vive en `WhatsAppConfig`, misma idea).
+5. **Recordatorio de renovación** del cert MJS CA (antes de 14/09/2031).
+6. Revisar si `WhatsAppWeb` debe correr con cuenta no-SYSTEM (`NETWORK SERVICE` u otra restringida) para menor superficie.
 
 ## Seguridad
 

@@ -23,6 +23,7 @@
         <button data-vista="cola">Cola de envíos</button>
         <button data-vista="dashboard">Dashboard</button>
         <button data-vista="contactos">Contactos</button>
+        <button data-vista="alarmas">Alarmas</button>
         <button id="btnSalir">Salir</button>
       </nav>
     </header>
@@ -102,6 +103,49 @@
               </tr>
             </thead>
             <tbody id="contactosLlaves"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- VISTA ALARMAS -->
+      <section id="vista-alarmas" class="vista" hidden>
+        <form id="formAlarma" class="contacto-form">
+          <input type="hidden" id="aId" />
+          <input type="text" id="aNombre" placeholder="Nombre de la alarma *" required />
+          <select id="aTipo" class="ancho">
+            <option value="nueva_factura">Nueva factura con criterios</option>
+            <option value="resumen_dia">Resumen / acumulado a hora</option>
+          </select>
+          <div id="criteriosCampos" class="crit-campos"></div>
+          <div class="fila">
+            <label class="campo">Hora <input type="time" id="aHora" value="23:00" required /></label>
+            <div class="campo-dias">
+              <span>Días:</span>
+              <span id="aDias"></span>
+            </div>
+          </div>
+          <div class="campo-destinos">
+            <span>Destinatarios (contactos activos):</span>
+            <div id="aDestinos" class="destinos"></div>
+          </div>
+          <label><input type="checkbox" id="aActivo" checked /> Activa</label>
+          <button type="submit" id="aGuardar">Añadir</button>
+          <button type="button" id="aCancelar" hidden>Cancelar</button>
+        </form>
+        <div class="tabla-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Alarma</th>
+                <th>Tipo</th>
+                <th>Hora</th>
+                <th>Días</th>
+                <th>Destinos</th>
+                <th>Activa</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="alarmasLlaves"></tbody>
           </table>
         </div>
       </section>

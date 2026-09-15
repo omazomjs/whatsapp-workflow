@@ -6,8 +6,17 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import session from 'express-session';
 import { config } from '../config.js';
-import { getPool, closePool } from '../src/database.js';
+import { getPool, closePool, getConfig, setConfig } from '../src/database.js';
 import { normalizeNumber } from '../src/outbox.js';
+import {
+  listarAlarmas,
+  listarEstados,
+  crearAlarma,
+  actualizarAlarma,
+  eliminarAlarma,
+  ejecucionesAlarma,
+  probarAlarma,
+} from '../src/alarmas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -325,6 +334,171 @@ app.delete('/api/contactos/:id', requiereSesion, async (req, res) => {
     ]);
     res.json({ ok: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- Alarmas (Fase 1) ----
+async function configResumenEfectiva() {
+  const get = async (k, d) => getConfig(k, d);
+  const enabled =
+    String(await get('resumen.enabled', config.resumen.enabled ? 'true' : 'false')) !== 'false';
+  const hour = Number(await get('resumen.hora', config.resumen.hour));
+  const minute = Number(await get('resumen.minuto', config.resumen.minute));
+  const recipients = String(
+    await get('resumen.recipientes', (config.resumen.recipients ?? []).join(','))
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return {
+    enabled,
+    hora: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+    recipients,
+  };
+}
+
+app.get('/api/alarmas', requiereSesion, async (req, res) => {
+  try {
+    const registros = await listarAlarmas();
+    const rc = await configResumenEfectiva();
+    if (rc.enabled) {
+      const pool = await getPool();
+      const contactos = (
+        await pool.request().query('SELECT Id, Nombre, Telefono FROM dbo.WhatsAppContactos')
+      ).recordset;
+      registros.unshift({
+        Id: 0,
+        Nombre: 'RESUMEN DIARIO',
+        Tipo: 'resumen_dia',
+        criterios: { eliminadas: true, avisoSinMovimientos: true },
+        Hora: rc.hora,
+        DiasSemana: '0123456',
+        Activo: true,
+        virtual: true,
+        contactos: rc.recipients.map((tlf) => {
+          const c = contactos.find((x) => normalizeNumber(x.Telefono) === normalizeNumber(tlf));
+          return c ? { Id: c.Id, Nombre: c.Nombre } : { Id: null, Nombre: String(tlf) };
+        }),
+      });
+    }
+    res.json({ registros });
+  } catch (err) {
+    console.error('[API] /api/alarmas:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/config/resumen', requiereSesion, async (req, res) => {
+  try {
+    const rc = await configResumenEfectiva();
+    const pool = await getPool();
+    const contactos = (
+      await pool.request().query('SELECT Id, Telefono FROM dbo.WhatsAppContactos')
+    ).recordset;
+    const contactosIds = rc.recipients
+      .map((tlf) => {
+        const c = contactos.find((x) => normalizeNumber(x.Telefono) === normalizeNumber(tlf));
+        return c ? c.Id : null;
+      })
+      .filter((x) => x !== null);
+    res.json({
+      enabled: rc.enabled,
+      hora: rc.hora,
+      diasSemana: '0123456',
+      criterios: { eliminadas: true, avisoSinMovimientos: true },
+      contactosIds,
+      catchupDays: config.resumen.catchupDays,
+    });
+  } catch (err) {
+    console.error('[API] GET /api/config/resumen:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/config/resumen', requiereSesion, async (req, res) => {
+  try {
+    const hora = String(req.body?.hora ?? '');
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hora);
+    if (!m) return res.status(400).json({ error: 'Hora invalida (formato HH:MM)' });
+    const contactosIds = Array.isArray(req.body?.contactosIds) ? req.body.contactosIds : [];
+    if (contactosIds.length === 0)
+      return res.status(400).json({ error: 'Selecciona al menos un destinatario' });
+    const pool = await getPool();
+    const contactos = (
+      await pool.request().query('SELECT Id, Telefono FROM dbo.WhatsAppContactos')
+    ).recordset;
+    const telefonos = contactosIds
+      .map((id) => contactos.find((c) => c.Id === Number(id))?.Telefono)
+      .filter(Boolean);
+    if (telefonos.length === 0)
+      return res.status(400).json({ error: 'Destinatario no valido' });
+    await setConfig('resumen.enabled', req.body.activo === false ? 'false' : 'true');
+    await setConfig('resumen.hora', m[1]);
+    await setConfig('resumen.minuto', m[2]);
+    await setConfig('resumen.recipientes', telefonos.join(','));
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] PUT /api/config/resumen:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/alarmas', requiereSesion, async (req, res) => {
+  try {
+    res.json(await crearAlarma(req.body));
+  } catch (err) {
+    if (err.message.startsWith('[') || /(obligatorio|invalida|Elige|Selecciona)/i.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('[API] POST /api/alarmas:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/alarmas/:id', requiereSesion, async (req, res) => {
+  try {
+    res.json(await actualizarAlarma(req.params.id, req.body));
+  } catch (err) {
+    if (/(obligatorio|invalida|Elige|Selecciona)/i.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('[API] PUT /api/alarmas:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/alarmas/:id', requiereSesion, async (req, res) => {
+  try {
+    res.json(await eliminarAlarma(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/alarmas/:id/probar', requiereSesion, async (req, res) => {
+  try {
+    res.json(await probarAlarma(req.params.id));
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/alarmas/:id/ejecuciones', requiereSesion, async (req, res) => {
+  try {
+    const { n } = req.query;
+    res.json({ registros: await ejecucionesAlarma(req.params.id, n) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/estados', requiereSesion, async (req, res) => {
+  try {
+    res.json({ registros: await listarEstados() });
+  } catch (err) {
+    console.error('[API] /api/estados:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

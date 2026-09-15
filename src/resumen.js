@@ -1,7 +1,20 @@
-import { fetchResumenDiario, insertOutbox, getState, setState } from './database.js';
+import { fetchResumenDiario, insertOutbox, getState, setState, getConfig } from './database.js';
 import { config } from '../config.js';
 
 const STATE_KEY = 'lastResumenDate';
+
+async function leerConfigResumen() {
+  const enabled = String(await getConfig('resumen.enabled', config.resumen.enabled ? 'true' : 'false')) !== 'false';
+  const hour = Number(await getConfig('resumen.hora', config.resumen.hour));
+  const minute = Number(await getConfig('resumen.minuto', config.resumen.minute));
+  const recipients = String(
+    await getConfig('resumen.recipientes', (config.resumen.recipients ?? []).join(','))
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return { enabled, hour, minute, recipients };
+}
 
 function toYMD(date) {
   const p = (n) => String(n).padStart(2, '0');
@@ -21,11 +34,12 @@ function addDays(date, n) {
 }
 
 export async function maybeEnviarResumen() {
-  if (!config.resumen.enabled) return;
+  const c = await leerConfigResumen();
+  if (!c.enabled) return;
 
   const now = new Date();
   const target = new Date(now);
-  target.setHours(config.resumen.hour, config.resumen.minute, 0, 0);
+  target.setHours(c.hour, c.minute, 0, 0);
   if (now < target) return;
 
   const hoy = toYMD(now);
@@ -65,7 +79,7 @@ export async function maybeEnviarResumen() {
 
     const msg = buildMensaje(data, desde);
 
-    for (const tlf of config.resumen.recipients) {
+    for (const tlf of c.recipients) {
       try {
         await insertOutbox(tlf, msg);
       } catch (err) {
@@ -77,7 +91,7 @@ export async function maybeEnviarResumen() {
     await setState(STATE_KEY, dia);
     const etiqueta = esHoy ? 'encolado' : 'encolado (recuperado)';
     console.log(
-      `[Resumen] Resumen del ${dia} ${etiqueta} para ${config.resumen.recipients.length} movil(es)`
+      `[Resumen] Resumen del ${dia} ${etiqueta} para ${c.recipients.length} movil(es)`
     );
   }
 }
@@ -96,7 +110,7 @@ function diasPendientes(last, hoy) {
   return resultado;
 }
 
-export function buildMensaje(data, desde) {
+export function buildMensaje(data, desde, { elimInadas = true } = {}) {
   const t = data.total ?? {};
   const fecha = desde.toLocaleDateString('es-ES');
 
@@ -125,7 +139,7 @@ export function buildMensaje(data, desde) {
   lineas.push('');
   lineas.push(`TOTAL: ${total} - ${fmt(t.Suma)}`);
 
-  if (borradas > 0) {
+  if (elimInadas && borradas > 0) {
     lineas.push(`ELIMINADAS: ${borradas}`);
   }
 

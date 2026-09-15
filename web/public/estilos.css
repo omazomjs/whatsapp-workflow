@@ -173,3 +173,15 @@ button.mini {
   margin-right: 4px;
 }
 button.rojo { color: var(--mal); }
+td.nota { color: var(--txt2); font-size: 12px; font-style: italic; white-space: nowrap; }
+
+.fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.campo { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.campo-dias { display: inline-flex; align-items: center; gap: 6px; }
+.campo-dias label { display: inline-flex; align-items: center; gap: 2px; }
+.campo-destinos { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.campo-destinos > span:first-child { color: #57606a; }
+.destinos { display: flex; gap: 8px; flex-wrap: wrap; }
+.destinos label { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; }
+.crit-campos { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.ancho { min-width: 260px; }

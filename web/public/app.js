@@ -74,8 +74,10 @@
     $('#vista-cola').hidden = nueva !== 'cola';
     $('#vista-dashboard').hidden = nueva !== 'dashboard';
     $('#vista-contactos').hidden = nueva !== 'contactos';
+    $('#vista-alarmas').hidden = nueva !== 'alarmas';
     if (nueva === 'dashboard') cargarDashboard();
     if (nueva === 'contactos') cargarContactos();
+    if (nueva === 'alarmas') cargarAlarmas();
     if (nueva === 'cola') cargarCola();
   }
 
@@ -339,6 +341,311 @@
       try {
         await api(`/api/contactos/${id}`, { method: 'DELETE' });
         cargarContactos();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+  });
+
+  // ---- Alarmas ----
+  const DIAS_ALARMAS = [
+    ['1', 'L'], ['2', 'M'], ['3', 'X'], ['4', 'J'], ['5', 'V'], ['6', 'S'], ['0', 'D'],
+  ];
+  let listaEstados = null;
+  let cacheContactosAlarma = [];
+
+  async function cargarEstados() {
+    if (listaEstados) return;
+    const r = await api('/api/estados');
+    listaEstados = r?.registros ?? [];
+  }
+
+  function initCriterios(tipo) {
+    const c = $('#criteriosCampos');
+    if (tipo === 'nueva_factura') {
+      c.innerHTML = `
+        <div class="fila"><label class="campo">Importe mín. <input type="number" id="ciImporteMin" min="0" step="0.01" placeholder="—"/></label>
+          <label class="campo">Importe máx. <input type="number" id="ciImporteMax" min="0" step="0.01" placeholder="—"/></label></div>
+        <label class="campo">Estado <select id="ciEstado"><option value="">Todos</option></select></label>`;
+    } else if (tipo === 'resumen_dia') {
+      c.innerHTML = `
+        <label><input type="checkbox" id="ciEliminadas" checked/> Incluir eliminadas</label>
+        <label><input type="checkbox" id="ciAviso"/> Avisar aunque no haya movimientos</label>`;
+    } else {
+      c.innerHTML = '';
+    }
+    return c;
+  }
+
+  function rellenarEstadosSelect() {
+    const sel = $('#ciEstado');
+    if (!sel || !listaEstados) return;
+    sel.innerHTML = '<option value="">Todos</option>' +
+      listaEstados.map(e => `<option value="${e.Id}">${e.Texto}</option>`).join('');
+  }
+
+  function leerCriteriosForm() {
+    const tipo = $('#aTipo').value;
+    if (tipo === 'nueva_factura') {
+      const min = $('#ciImporteMin')?.value?.trim() ?? '';
+      const max = $('#ciImporteMax')?.value?.trim() ?? '';
+      const est = $('#ciEstado')?.value ?? '';
+      return {
+        importeMin: min === '' ? null : Number(min),
+        importeMax: max === '' ? null : Number(max),
+        IDEstado: est === '' ? null : Number(est),
+      };
+    }
+    if (tipo === 'resumen_dia') {
+      return {
+        eliminadas: $('#ciEliminadas')?.checked ?? true,
+        avisoSinMovimientos: $('#ciAviso')?.checked ?? false,
+      };
+    }
+    return {};
+  }
+
+  function renderDias() {
+    const cont = $('#aDias');
+    if (!cont) return;
+    cont.innerHTML = '';
+    for (const [v, label] of DIAS_ALARMAS) {
+      const lab = document.createElement('label');
+      lab.innerHTML = `<input type="checkbox" value="${v}" id="dia${v}"/> ${label}`;
+      cont.appendChild(lab);
+    }
+  }
+
+  function asegurarDias() {
+    if ($('#aDias') && !$('#aDias').children.length) renderDias();
+  }
+
+  function diasForm() {
+    return DIAS_ALARMAS.filter(([v]) => $(`#dia${v}`)?.checked).map(([v]) => v).join('');
+  }
+
+  function setDiasForm(str) {
+    for (const [v] of DIAS_ALARMAS) {
+      const el = $(`#dia${v}`);
+      if (el) el.checked = str.includes(v);
+    }
+  }
+
+  function destinosForm() {
+    return [...document.querySelectorAll('#aDestinos input[type=checkbox]:checked')]
+      .map(el => Number(el.value));
+  }
+
+  function setDestinosForm(ids) {
+    document.querySelectorAll('#aDestinos input[type=checkbox]').forEach(el => {
+      el.checked = ids.includes(Number(el.value));
+    });
+  }
+
+  function reiniciarFormAlarma() {
+    $('#formAlarma').reset();
+    $('#aId').value = '';
+    $('#aTipo').disabled = false;
+    $('#aGuardar').textContent = 'Añadir';
+    $('#aCancelar').hidden = true;
+    initCriterios('nueva_factura');
+    rellenarEstadosSelect();
+    asegurarDias();
+    setDiasForm('0123456');
+    setDestinosForm([]);
+    $('#aActivo').checked = true;
+    document.querySelectorAll('#aDias input[type=checkbox]').forEach(el => { el.disabled = false; });
+  }
+
+  $('#aCancelar').addEventListener('click', reiniciarFormAlarma);
+  $('#aTipo').addEventListener('change', () => {
+    initCriterios($('#aTipo').value);
+    if ($('#aTipo').value === 'nueva_factura') rellenarEstadosSelect();
+  });
+
+  async function cargarAlarmas() {
+    await cargarEstados();
+    await cargarContactosAlarma();
+    asegurarDias();
+    try {
+      const [alarmasRes] = await Promise.all([api('/api/alarmas')]);
+      if (!alarmasRes) return;
+      const tb = $('#alarmasLlaves');
+      tb.innerHTML = '';
+      for (const a of alarmasRes.registros ?? []) {
+        const tr = document.createElement('tr');
+        const dias = (a.DiasSemana ?? '').split('').map(d => {
+          const label = DIAS_ALARMAS.find(([v]) => v === d);
+          return label ? label[1] : d;
+        }).join('');
+        const nombres = (a.contactos ?? []).map(c => c.Nombre).join(', ');
+        const acciones = a.virtual
+          ? `<td><button class="mini" data-id="${a.Id}" data-accion="configurar">Configurar</button></td>`
+          : `<td>
+              <button class="mini" data-id="${a.Id}" data-accion="editar">Editar</button>
+              <button class="mini" data-id="${a.Id}" data-accion="probar">Probar</button>
+              <button class="mini" data-id="${a.Id}" data-accion="historial">Historial</button>
+              <button class="mini rojo" data-id="${a.Id}" data-accion="borrar">Borrar</button>
+            </td>`;
+        tr.innerHTML = `
+          <td>${a.Nombre}</td>
+          <td>${a.Tipo}</td>
+          <td>${a.Hora}</td>
+          <td>${dias}</td>
+          <td>${nombres}</td>
+          <td>${a.Activo ? '✔' : ''}</td>
+          ${acciones}`;
+        tb.appendChild(tr);
+      }
+    } catch (err) {
+      $('#alarmasLlaves').innerHTML = `<tr><td colspan="7" class="error">${err.message}</td></tr>`;
+    }
+  }
+
+  async function cargarContactosAlarma() {
+    try {
+      const r = await api('/api/contactos?buscar=&todos=1');
+      cacheContactosAlarma = r?.registros ?? [];
+      const cont = $('#aDestinos');
+      cont.innerHTML = cacheContactosAlarma
+        .filter(c => c.Activo)
+        .map(c => `<label><input type="checkbox" value="${c.Id}"/> ${c.Nombre}</label>`)
+        .join('');
+    } catch { /* ignora */ }
+  }
+
+  $('#formAlarma').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const id = $('#aId').value;
+    if (id === 'R') {
+      try {
+        await api('/api/config/resumen', {
+          method: 'PUT',
+          body: JSON.stringify({
+            hora: $('#aHora').value,
+            contactosIds: destinosForm(),
+            activo: $('#aActivo').checked,
+          }),
+        });
+        reiniciarFormAlarma();
+        cargarAlarmas();
+      } catch (err) {
+        alert(err.message);
+      }
+      return;
+    }
+    const datos = {
+      nombre: $('#aNombre').value.trim(),
+      tipo: $('#aTipo').value,
+      criterios: leerCriteriosForm(),
+      hora: $('#aHora').value,
+      diasSemana: diasForm(),
+      activo: $('#aActivo').checked,
+      contactosIds: destinosForm(),
+    };
+    try {
+      await api(`/api/alarmas${id ? '/' + id : ''}`, {
+        method: id ? 'PUT' : 'POST',
+        body: JSON.stringify(datos),
+      });
+      reiniciarFormAlarma();
+      cargarAlarmas();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  $('#alarmasLlaves').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button[data-accion]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+
+    if (btn.dataset.accion === 'editar') {
+      try {
+        const r = await api('/api/alarmas');
+        if (!r) return;
+        const a = (r.registros ?? []).find(x => x.Id === Number(id));
+        if (!a) return;
+        $('#aId').value = a.Id;
+        $('#aNombre').value = a.Nombre;
+        $('#aTipo').value = a.Tipo;
+        $('#aTipo').disabled = false;
+        initCriterios(a.Tipo);
+        if (a.Tipo === 'nueva_factura') {
+          rellenarEstadosSelect();
+          $('#ciImporteMin').value = a.criterios.importeMin ?? '';
+          $('#ciImporteMax').value = a.criterios.importeMax ?? '';
+          $('#ciEstado').value = a.criterios.IDEstado ?? '';
+        }
+        if (a.Tipo === 'resumen_dia') {
+          $('#ciEliminadas').checked = a.criterios.eliminadas !== false;
+          $('#ciAviso').checked = Boolean(a.criterios.avisoSinMovimientos);
+        }
+        $('#aHora').value = a.Hora;
+        setDiasForm(a.DiasSemana);
+        setDestinosForm((a.contactos ?? []).map(c => c.Id));
+        $('#aActivo').checked = a.Activo;
+        $('#aGuardar').textContent = 'Guardar';
+        $('#aCancelar').hidden = false;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (err) {
+        alert(err.message);
+      }
+    } else if (btn.dataset.accion === 'configurar') {
+      try {
+        const r = await api('/api/config/resumen');
+        if (!r) return;
+        $('#aId').value = 'R';
+        $('#aNombre').value = 'RESUMEN DIARIO';
+        $('#aTipo').value = 'resumen_dia';
+        $('#aTipo').disabled = true;
+        initCriterios('');
+        $('#aHora').value = r.hora;
+        asegurarDias();
+        setDiasForm('0123456');
+        document.querySelectorAll('#aDias input[type=checkbox]').forEach(el => { el.disabled = true; });
+        setDestinosForm(r.contactosIds ?? []);
+        $('#aActivo').checked = r.enabled;
+        $('#aGuardar').textContent = 'Guardar';
+        $('#aCancelar').hidden = false;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (err) {
+        alert(err.message);
+      }
+    } else if (btn.dataset.accion === 'probar') {
+      if (!confirm('¿Probar ahora? Se evaluará y, si hay datos, se enviarán mensajes reales.')) return;
+      try {
+        const r = await api(`/api/alarmas/${id}/probar`, { method: 'POST' });
+        if (!r) return;
+        $('#modalTitulo').textContent = `Prueba · ${r.resultado}`;
+        $('#modalCuerpo').textContent =
+          (r.mensaje ? `Vista previa del mensaje:\n${r.mensaje}\n\n────────────────────────\n\n` : '') +
+          `Resultado: ${r.resultado}\nDestinos: ${(r.destinatarios ?? []).length}\nEncolados: ${r.encolados ?? 0}\nDetalle: ${r.detalle ?? ''}`;
+        $('#modal').hidden = false;
+        cargarAlarmas();
+      } catch (err) {
+        alert(err.message);
+      }
+    } else if (btn.dataset.accion === 'historial') {
+      try {
+        const r = await api(`/api/alarmas/${id}/ejecuciones`);
+        if (!r) return;
+        const lineas = (r.registros ?? []).map(e =>
+          `${e.Dia} ${e.EjecutadaAt}  ${e.Origen.padEnd(7)} ${e.Resultado}  (${e.Encolados}) ${e.Detalle ?? ''}`
+        );
+        $('#modalTitulo').textContent = 'Historial de ejecuciones';
+        $('#modalCuerpo').textContent = lineas.length
+          ? `Fecha          Hora               Origen   Resultado    Cant  Detalle\n${'─'.repeat(80)}\n${lineas.join('\n')}`
+          : 'Sin ejecuciones todavía.';
+        $('#modal').hidden = false;
+      } catch (err) {
+        alert(err.message);
+      }
+    } else if (btn.dataset.accion === 'borrar') {
+      if (!confirm('¿Borrar esta alarma?')) return;
+      try {
+        await api(`/api/alarmas/${id}`, { method: 'DELETE' });
+        cargarAlarmas();
       } catch (err) {
         alert(err.message);
       }

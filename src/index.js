@@ -4,6 +4,7 @@ import { ingestSource } from './ingest.js';
 import { maybeEnviarResumen } from './resumen.js';
 import { processOutbox } from './outbox.js';
 import { closePool, setState } from './database.js';
+import { procesarAlarmas } from './alarmas.js';
 import { config } from '../config.js';
 
 let timer = null;
@@ -21,6 +22,11 @@ async function tick(client) {
     await maybeEnviarResumen();
   } catch (err) {
     console.error('[Workflow] Error en el resumen diario:', err.message);
+  }
+  try {
+    await procesarAlarmas();
+  } catch (err) {
+    console.error('[Workflow] Error en el motor de alarmas:', err.message);
   }
   try {
     await processOutbox(client);

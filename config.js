@@ -39,6 +39,11 @@ export const config = {
       .filter(Boolean),
     catchupDays: Number(process.env.RESUMEN_CATCHUP_DAYS ?? 7),
   },
+  alarmas: {
+    enabled: (process.env.ALARMAS_ENABLED ?? 'true') === 'true',
+    intervalSec: Math.max(15, Number(process.env.ALARMAS_INTERVAL_S ?? 60)),
+    keepEjecuciones: Number(process.env.ALARMAS_HISTORIAL ?? 200),
+  },
   whatsapp: {
     sessionDir: process.env.WA_SESSION_DIR ?? 'sessions',
     chromePath: process.env.WA_CHROME_PATH,
