@@ -360,12 +360,26 @@
     listaEstados = r?.registros ?? [];
   }
 
+  function sincronizarModo() {
+    const esNueva = $('#aTipo').value === 'nueva_factura';
+    $('#aModo').hidden = !esNueva;
+    $('#aModoNota').hidden = !esNueva;
+    if (!esNueva && $('#aModo').value === 'INMEDIATA') {
+      $('#aModo').value = 'DIARIA';
+    }
+  }
+
   function initCriterios(tipo) {
     const c = $('#criteriosCampos');
     if (tipo === 'nueva_factura') {
       c.innerHTML = `
         <div class="fila"><label class="campo">Importe mín. <input type="number" id="ciImporteMin" min="0" step="0.01" placeholder="—"/></label>
           <label class="campo">Importe máx. <input type="number" id="ciImporteMax" min="0" step="0.01" placeholder="—"/></label></div>
+        <label class="campo">Estado <select id="ciEstado"><option value="">Todos</option></select></label>`;
+    } else if (tipo === 'pendientes') {
+      c.innerHTML = `
+        <div class="fila"><label class="campo">Importe mín. <input type="number" id="ciPImporteMin" min="0" step="0.01" placeholder="—"/></label>
+          <label class="campo">Antigüedad mín. (días) <input type="number" id="ciPDias" min="0" step="1" placeholder="—"/></label></div>
         <label class="campo">Estado <select id="ciEstado"><option value="">Todos</option></select></label>`;
     } else if (tipo === 'resumen_dia') {
       c.innerHTML = `
@@ -393,6 +407,16 @@
       return {
         importeMin: min === '' ? null : Number(min),
         importeMax: max === '' ? null : Number(max),
+        IDEstado: est === '' ? null : Number(est),
+      };
+    }
+if (tipo === 'pendientes') {
+      const min = $('#ciPImporteMin')?.value?.trim() ?? '';
+      const dias = $('#ciPDias')?.value?.trim() ?? '';
+      const est = $('#ciEstado')?.value ?? '';
+      return {
+        importeMin: min === '' ? null : Number(min),
+        diasMin: dias === '' ? null : Number(dias),
         IDEstado: est === '' ? null : Number(est),
       };
     }
@@ -446,11 +470,13 @@
     $('#formAlarma').reset();
     $('#aId').value = '';
     $('#aTipo').disabled = false;
+    $('#aModo').value = 'DIARIA';
     $('#aGuardar').textContent = 'Añadir';
     $('#aCancelar').hidden = true;
     initCriterios('nueva_factura');
     rellenarEstadosSelect();
     asegurarDias();
+    sincronizarModo();
     setDiasForm('0123456');
     setDestinosForm([]);
     $('#aActivo').checked = true;
@@ -460,7 +486,8 @@
   $('#aCancelar').addEventListener('click', reiniciarFormAlarma);
   $('#aTipo').addEventListener('change', () => {
     initCriterios($('#aTipo').value);
-    if ($('#aTipo').value === 'nueva_factura') rellenarEstadosSelect();
+    if (['nueva_factura', 'pendientes'].includes($('#aTipo').value)) rellenarEstadosSelect();
+    sincronizarModo();
   });
 
   async function cargarAlarmas() {
@@ -479,6 +506,8 @@
           return label ? label[1] : d;
         }).join('');
         const nombres = (a.contactos ?? []).map(c => c.Nombre).join(', ');
+        const etiquetaTipo = { nueva_factura: 'Nueva factura', pendientes: 'Pendientes', resumen_dia: 'Resumen diario' }[a.Tipo] ?? a.Tipo;
+        const modo = a.virtual ? '—' : `<span class="pill pill-${a.Modo || 'DIARIA'}">${a.Modo || 'DIARIA'}</span>`;
         const acciones = a.virtual
           ? `<td><button class="mini" data-id="${a.Id}" data-accion="configurar">Configurar</button></td>`
           : `<td>
@@ -489,7 +518,8 @@
             </td>`;
         tr.innerHTML = `
           <td>${a.Nombre}</td>
-          <td>${a.Tipo}</td>
+          <td>${etiquetaTipo}</td>
+          <td>${modo}</td>
           <td>${a.Hora}</td>
           <td>${dias}</td>
           <td>${nombres}</td>
@@ -498,7 +528,7 @@
         tb.appendChild(tr);
       }
     } catch (err) {
-      $('#alarmasLlaves').innerHTML = `<tr><td colspan="7" class="error">${err.message}</td></tr>`;
+      $('#alarmasLlaves').innerHTML = `<tr><td colspan="8" class="error">${err.message}</td></tr>`;
     }
   }
 
@@ -537,6 +567,7 @@
     const datos = {
       nombre: $('#aNombre').value.trim(),
       tipo: $('#aTipo').value,
+      modo: $('#aModo').value,
       criterios: leerCriteriosForm(),
       hora: $('#aHora').value,
       diasSemana: diasForm(),
@@ -570,11 +601,19 @@
         $('#aNombre').value = a.Nombre;
         $('#aTipo').value = a.Tipo;
         $('#aTipo').disabled = false;
+        $('#aModo').value = a.Modo ?? 'DIARIA';
         initCriterios(a.Tipo);
+        sincronizarModo();
         if (a.Tipo === 'nueva_factura') {
           rellenarEstadosSelect();
           $('#ciImporteMin').value = a.criterios.importeMin ?? '';
           $('#ciImporteMax').value = a.criterios.importeMax ?? '';
+          $('#ciEstado').value = a.criterios.IDEstado ?? '';
+        }
+        if (a.Tipo === 'pendientes') {
+          rellenarEstadosSelect();
+          $('#ciPImporteMin').value = a.criterios.importeMin ?? '';
+          $('#ciPDias').value = a.criterios.diasMin ?? '';
           $('#ciEstado').value = a.criterios.IDEstado ?? '';
         }
         if (a.Tipo === 'resumen_dia') {
@@ -599,7 +638,9 @@
         $('#aNombre').value = 'RESUMEN DIARIO';
         $('#aTipo').value = 'resumen_dia';
         $('#aTipo').disabled = true;
+        $('#aModo').value = 'DIARIA';
         initCriterios('');
+        sincronizarModo();
         $('#aHora').value = r.hora;
         asegurarDias();
         setDiasForm('0123456');

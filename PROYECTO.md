@@ -11,6 +11,16 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 
 ## Bitácora
 
+- **15/09 — Casa: Fase 1b · Alarmas INMEDIATAS + tipo `pendientes`/estancadas + branding corporativo**:
+  - Nuevo **modo de alarma**: `DIARIA` (a la hora fijada) o **`INMEDIATA`** (aviso en cuanto entra en `REFact` una factura que cumple los criterios). Solo válido para tipo `nueva_factura`.
+  - Migración idempotente (ya añadida a `src/migrar.js`, **pendiente de ejecutar en el servidor**): `WhatsAppAlarmas ADD Modo NVARCHAR(20) NOT NULL DEFAULT 'DIARIA'` + `ADD UltimoUptoAt DATETIME2 NULL` (marca de agua de la última factura avisada).
+  - `src/alarmas.js`: `procesarInmediata()` consulta `[REFact].dbo.Registro` con `AudiFecha > UltimoUptoAt` (agrupado por alarma) y, si hay hueco anti-baneo, encola un **resumen con contador y total** (`n factura(s) desde las HH:MM - total €`) en `WhatsAppOutbox`. Si está throttled, NO avanza la marca de agua (el aviso espera al próximo hueco) → nunca se pierde.
+  - **Frenos anti-baneo globales** en `config.js`/`.env.example`: `ALARMAS_MIN_ESPACIO_S` (900 = 15 min), `ALARMAS_MAX_HORA` (3), `ALARMAS_MAX_DIA` (12).
+  - **Nuevo tipo `pendientes`** (facturas estancadas): `evaluarPendientes()` con criterios `importeMin`, `diasMin`, `IDEstado` — la "alarma de estancadas" que manda la jefa. Se ejecuta a hora fija (sin modo inmediato).
+  - Panel: formulario de alarmas con selector Modo (visible solo para nueva factura, nota anti-baneo), opción `pendientes`, nueva **columna Modo** en la tabla (tabla a 8 columnas), `colspan*=8`; payload CRUD con `modo`; carga de `Modo`/criterios `pendientes` en edición.
+  - **Branding con la identidad corporativa de www.maderasjosesaiz.es** (colores extraídos de su CSS): verde bosque `#1c5b2c`, verde oscuro `#104023`, salvia `#ccd9c8`, verde medio `#1a5c34`, oliva `#796e01`. `estilos.css` reescrito sobre esa paleta; login y cabecera con **logo corporativo** (`web/public/logo.png`, bajado de `/images/logo_relieve.png` de la web); favicon + título "Panel de avisos · Maderas José Sáiz". Sin CDN ni fuentes externas.
+  - Estado: desarrollo local con `npm run check` OK (sintaxis). **Pendiente**: validar contra BD real por VPN (`evaluarPendientes` + migrar), desplegar al servidor (robocopy de `config.js`, `package.json`, `src/`, `web/`), `npm run migrar` en servidor, reiniciar `WhatsAppWorkflow` y `WhatsAppWeb`, commit y push.
+
 - **14/09 (noche) — Fase 1: Alarmas programadas en el panel**:
   - Nuevo módulo `src/alarmas.js` (scheduler + evaluadores + CRUD + `probar` + historial).
     - Tipos: `nueva_factura` (criterios `importeMin`/`importeMax`/`IDEstado`) y `resumen_dia` (acumulado por criterio a una hora).

@@ -1,7 +1,11 @@
 // Motor de alarmas: reglas "criterio -> mensaje WhatsApp" configuradas en
-// el panel. Dos tipos por ahora:
+// el panel. Tipos:
 //   - nueva_factura : avisa de facturas dadas de alta hoy que cumplen filtros
-//                     (importe minimo/maximo, ID de estado).
+//                     (importe minimo/maximo, ID de estado). Puede ejecutarse
+//                     en modo DIARIA (resumen a una hora) o INMEDIATA (aviso
+//                     en cuanto aparezca algo nuevo, con frenos anti-baneo).
+//   - pendientes    : facturas que llevan >= N dias en el sistema (o en un
+//                     estado) con importe >= X: aviso diario a una hora.
 //   - resumen_dia   : el resumen diario enviado a una hora configurable con
 //                     destinatarios elegidos desde WhatsAppContactos.
 // El worker revisa cada ALARMAS_INTERVAL_S y ejecuta las que tocan; cada
@@ -12,10 +16,42 @@ import { fetchResumenDiario } from './database.js';
 import { buildMensaje } from './resumen.js';
 import { config } from '../config.js';
 
-const TIPOS_VALIDOS = ['nueva_factura', 'resumen_dia'];
+const TIPOS_VALIDOS = ['nueva_factura', 'pendientes', 'resumen_dia'];
+const MODOS_VALIDOS = ['DIARIA', 'INMEDIATA'];
 const DIAS_VALIDOS = '0123456'; // mismo orden que Date.getDay(): 0=Domingo
 
 let ultimaRevisionMs = 0;
+
+/* ---------- frenos anti-baneo del modo INMEDIATA (compartidos) ---------- */
+let ultimoEnvioMs = 0;
+let bucketHora = '';
+let enviosEnHora = 0;
+let bucketDia = '';
+let enviosEnDia = 0;
+
+function marcarEnvioInmediato() {
+  ultimoEnvioMs = Date.now();
+  bucketHora = toYMD(new Date()) + ':' + String(new Date().getHours()).padStart(2, '0');
+  bucketDia = toYMD(new Date());
+  enviosEnHora += 1;
+  enviosEnDia += 1;
+}
+
+function permitirEnvioInmediato() {
+  const ahora = new Date();
+  const hb = toYMD(ahora) + ':' + String(ahora.getHours()).padStart(2, '0');
+  const db = toYMD(ahora);
+  if (hb !== bucketHora) { bucketHora = hb; enviosEnHora = 0; }
+  if (db !== bucketDia) { bucketDia = db; enviosEnDia = 0; }
+  const min = config.alarmas.minEspacioS;
+  if (Date.now() - ultimoEnvioMs < min * 1000)
+    return { ok: false, motivo: `minimo ${Math.round(min / 60)} min entre avisos` };
+  if (enviosEnHora >= config.alarmas.maxPorHora)
+    return { ok: false, motivo: `tope de ${config.alarmas.maxPorHora}/hora alcanzado` };
+  if (enviosEnDia >= config.alarmas.maxPorDia)
+    return { ok: false, motivo: `tope de ${config.alarmas.maxPorDia}/dia alcanzado` };
+  return { ok: true, motivo: '' };
+}
 
 /* ---------- utilidades ---------- */
 
@@ -52,6 +88,20 @@ function fechaCorta(date) {
   return date.toLocaleDateString('es-ES');
 }
 
+function fmtHoraMin(date) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(date.getHours())}:${p(date.getMinutes())}`;
+}
+
+async function estadoDescripcion(pool, idEstado) {
+  if (idEstado == null) return null;
+  const er = await pool
+    .request()
+    .input('IDEstado', sql.Int, idEstado)
+    .query(`SELECT DescEstado AS Texto FROM [REFact].dbo.Estado WHERE IDEstado = @IDEstado`);
+  return er.recordset[0]?.Texto ?? `#${idEstado}`;
+}
+
 /* ---------- evaluadores ---------- */
 
 async function evaluarNuevaFactura(criterios) {
@@ -81,14 +131,7 @@ async function evaluarNuevaFactura(criterios) {
   const n = Number(fila?.N) || 0;
   if (n === 0) return { enviar: false };
 
-  let estadoDesc = null;
-  if (criterios.IDEstado != null) {
-    const er = await pool
-      .request()
-      .input('IDEstado', sql.Int, criterios.IDEstado)
-      .query(`SELECT DescEstado AS Texto FROM [REFact].dbo.Estado WHERE IDEstado = @IDEstado`);
-    estadoDesc = er.recordset[0]?.Texto ?? `#${criterios.IDEstado}`;
-  }
+  const estadoDesc = await estadoDescripcion(pool, criterios.IDEstado);
 
   const filtros = [];
   if (criterios.importeMin != null) filtros.push(`importe >= ${fmtEuro(criterios.importeMin)}`);
@@ -102,6 +145,52 @@ async function evaluarNuevaFactura(criterios) {
   }
   lineas.push('');
   lineas.push(`NUEVAS: ${n} - ${fmtEuro(fila.Suma)}`);
+
+  return { enviar: true, mensaje: lineas.join('\n') };
+}
+
+async function evaluarPendientes(criterios) {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('IDEstado', sql.Int, criterios.IDEstado ?? null)
+    .input('ImporteMin', sql.Float, criterios.importeMin ?? null)
+    .input('DiasMin', sql.Int, Number(criterios.diasMin) || 0)
+    .query(
+      `SELECT COUNT(*) AS N, ISNULL(SUM(Importe), 0) AS Suma,
+              MIN(AudiFecha) AS MasAntigua,
+              MAX(DATEDIFF(day, AudiFecha, GETDATE())) AS DiasMax
+         FROM [REFact].dbo.Registro
+        WHERE Borrado = 0
+          AND (@IDEstado IS NULL OR Estado = @IDEstado)
+          AND (@ImporteMin IS NULL OR Importe >= @ImporteMin)
+          AND DATEDIFF(day, AudiFecha, GETDATE()) >= @DiasMin`
+    );
+
+  const fila = r.recordset[0];
+  const n = Number(fila?.N) || 0;
+  if (n === 0) return { enviar: false };
+
+  const estadoDesc = await estadoDescripcion(pool, criterios.IDEstado);
+
+  const filtros = [];
+  if (estadoDesc) filtros.push(`estado ${estadoDesc}`);
+  if (criterios.importeMin != null) filtros.push(`importe >= ${fmtEuro(criterios.importeMin)}`);
+  if ((Number(criterios.diasMin) || 0) > 0)
+    filtros.push(`antiguedad >= ${Number(criterios.diasMin)} dias`);
+
+  const lineas = [`FACTURAS ESTANCADAS - ${fechaCorta(new Date())}`];
+  if (filtros.length) {
+    lineas.push('');
+    lineas.push(`Criterio: ${filtros.join(', ')}`);
+  }
+  lineas.push('');
+  lineas.push(`ENCONTRADAS: ${n} - ${fmtEuro(fila.Suma)}`);
+  if (fila.MasAntigua) {
+    const fecha = new Date(fila.MasAntigua).toLocaleDateString('es-ES');
+    const dias = fila.DiasMax != null ? ` (${Number(fila.DiasMax)} dias)` : '';
+    lineas.push(`Mas antigua: ${fecha}${dias}`);
+  }
 
   return { enviar: true, mensaje: lineas.join('\n') };
 }
@@ -173,6 +262,8 @@ async function ejecutarAlarma(alarma, dia, origen) {
     let resultado;
     if (alarma.Tipo === 'nueva_factura') {
       resultado = await evaluarNuevaFactura(criterios);
+    } else if (alarma.Tipo === 'pendientes') {
+      resultado = await evaluarPendientes(criterios);
     } else if (alarma.Tipo === 'resumen_dia') {
       resultado = await evaluarResumenDia(criterios);
     } else {
@@ -202,6 +293,94 @@ async function ejecutarAlarma(alarma, dia, origen) {
   }
 }
 
+/* ---------- modo INMEDIATO (alarma "en cuanto pase algo") ---------- */
+
+async function procesarInmediata(alarma) {
+  const ahora = new Date();
+  const dia = toYMD(ahora);
+  const criterios = leerCriterios(alarma.Criterios);
+  const destinos = (alarma.Telefonos ?? []).filter(Boolean);
+  const upto = alarma.UltimoUptoAt
+    ? new Date(alarma.UltimoUptoAt)
+    : new Date(ahora.getTime() - 3600 * 1000); // primera vez: ultima hora
+
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('Upto', sql.DateTime, upto)
+    .input('Ahora', sql.DateTime, ahora)
+    .input('ImporteMin', sql.Float, criterios.importeMin ?? null)
+    .input('ImporteMax', sql.Float, criterios.importeMax ?? null)
+    .input('IDEstado', sql.Int, criterios.IDEstado ?? null)
+    .query(
+      `SELECT COUNT(*) AS N, ISNULL(SUM(Importe), 0) AS Suma
+         FROM [REFact].dbo.Registro
+        WHERE AudiFecha > @Upto AND AudiFecha <= @Ahora
+          AND Borrado = 0
+          AND (@ImporteMin IS NULL OR Importe >= @ImporteMin)
+          AND (@ImporteMax IS NULL OR Importe <= @ImporteMax)
+          AND (@IDEstado IS NULL OR Estado = @IDEstado)`
+    );
+  const fila = r.recordset[0];
+  const n = Number(fila?.N) || 0;
+
+  const actualizarUpto = () =>
+    pool
+      .request()
+      .input('Id', sql.Int, alarma.Id)
+      .input('Upto', sql.DateTime2, ahora)
+      .query('UPDATE dbo.WhatsAppAlarmas SET UltimoUptoAt = @Upto WHERE Id = @Id');
+
+  if (n === 0) {
+    await actualizarUpto();
+    return { resultado: 'SIN_DATOS', encolados: 0, detalle: 'sin movimientos nuevos' };
+  }
+  if (!destinos.length) {
+    await registrar(alarma.Id, 'AUTO', dia, 'ERROR', 0, 'sin destinatarios activos');
+    await actualizarUpto();
+    return { resultado: 'ERROR', encolados: 0, detalle: 'sin destinatarios activos' };
+  }
+
+  const permitido = permitirEnvioInmediato();
+  if (!permitido.ok) {
+    // No se avanza la marca de agua: los movimientos quedan a la espera de
+    // que haya hueco (espacio minimo / tope de hora o dia), sin forzar la
+    // envio completo de golpe, para no arriesgar un baneo de WhatsApp.
+    console.log(
+      `[Alarmas] ${alarma.Nombre}: INMEDIATA esperando (${permitido.motivo}); ${n} factura(s) en cola de aviso`
+    );
+    return { resultado: 'THROTTLED', encolados: 0, detalle: permitido.motivo };
+  }
+
+  const filtros = [];
+  if (criterios.importeMin != null) filtros.push(`importe >= ${fmtEuro(criterios.importeMin)}`);
+  if (criterios.importeMax != null) filtros.push(`importe <= ${fmtEuro(criterios.importeMax)}`);
+  const estadoDesc = await estadoDescripcion(pool, criterios.IDEstado);
+  if (estadoDesc) filtros.push(`estado ${estadoDesc}`);
+
+  const lineas = [`FACTURAS NUEVAS EN REFACT - ${fechaCorta(ahora)}`];
+  if (filtros.length) lineas.push('', `Criterio: ${filtros.join(', ')}`);
+  lineas.push('', `${n} factura(s) desde las ${fmtHoraMin(upto)} - ${fmtEuro(fila.Suma)}`);
+  const mensaje = lineas.join('\n');
+
+  let encolados = 0;
+  try {
+    for (const tlf of destinos) {
+      await insertOutbox(tlf, mensaje);
+      encolados += 1;
+    }
+    marcarEnvioInmediato();
+    await actualizarUpto();
+    await registrar(alarma.Id, 'AUTO', dia, 'ENCOLADO', encolados, `inmediata (${n} factura(s)), ${encolados} destino(s)`);
+    console.log(`[Alarmas] ${alarma.Nombre}: INMEDIATA ENCOLADO (${n} factura(s), ${encolados} movil(es))`);
+    return { resultado: 'ENCOLADO', encolados, detalle: `inmediata (${n} factura(s))`, mensaje };
+  } catch (err) {
+    await registrar(alarma.Id, 'AUTO', dia, 'ERROR', 0, err.message);
+    console.log(`[Alarmas] ${alarma.Nombre}: INMEDIATA ERROR -> ${err.message}`);
+    return { resultado: 'ERROR', encolados: 0, detalle: err.message };
+  }
+}
+
 /* ---------- scheduler del worker ---------- */
 
 export async function procesarAlarmas() {
@@ -214,6 +393,7 @@ export async function procesarAlarmas() {
   const r = await pool.request().query(
     `SELECT a.Id, a.Nombre, a.Tipo, a.Criterios,
             CONVERT(varchar(5), a.Hora, 108) AS Hora, a.DiasSemana,
+            a.Modo, a.UltimoUptoAt,
             c.Telefono
        FROM dbo.WhatsAppAlarmas a
        LEFT JOIN dbo.WhatsAppAlarmaContactos ac ON ac.AlarmaId = a.Id
@@ -232,6 +412,8 @@ export async function procesarAlarmas() {
         Criterios: fila.Criterios ?? '{}',
         Hora: fila.Hora,
         DiasSemana: String(fila.DiasSemana ?? '0123456'),
+        Modo: String(fila.Modo ?? 'DIARIA').toUpperCase(),
+        UltimoUptoAt: fila.UltimoUptoAt,
         Telefonos: [],
       });
     }
@@ -244,6 +426,12 @@ export async function procesarAlarmas() {
 
   const noDias = '0123456';
   for (const alarma of porAlarma.values()) {
+    if (alarma.Modo === 'INMEDIATA') {
+      if (alarma.Tipo !== 'nueva_factura') continue;
+      await procesarInmediata(alarma);
+      continue;
+    }
+
     const hora = parseHora(alarma.Hora);
     if (!hora) continue;
 
@@ -273,6 +461,7 @@ export async function listarAlarmas() {
   const r = await pool.request().query(
     `SELECT a.Id, a.Nombre, a.Tipo, a.Criterios,
             CONVERT(varchar(5), a.Hora, 108) AS Hora, a.DiasSemana, a.Activo,
+            a.Modo, a.UltimoUptoAt,
             c.Id AS ContactoId, c.Nombre AS ContactoNombre
        FROM dbo.WhatsAppAlarmas a
        LEFT JOIN dbo.WhatsAppAlarmaContactos ac ON ac.AlarmaId = a.Id
@@ -291,6 +480,8 @@ export async function listarAlarmas() {
         Hora: fila.Hora,
         DiasSemana: String(fila.DiasSemana ?? '0123456'),
         Activo: Boolean(fila.Activo),
+        Modo: String(fila.Modo ?? 'DIARIA').toUpperCase(),
+        ultimoUptoAt: fila.UltimoUptoAt,
         contactos: [],
       });
     }
@@ -326,9 +517,10 @@ export async function crearAlarma(datos) {
       .input('Hora', sql.NVarChar(5), limpios.hora)
       .input('Dias', sql.NVarChar(20), limpios.diasSemana)
       .input('Activo', sql.Bit, limpios.activo)
+      .input('Modo', sql.NVarChar(20), limpios.modo)
       .query(
-        `INSERT INTO dbo.WhatsAppAlarmas (Nombre, Tipo, Criterios, Hora, DiasSemana, Activo)
-         VALUES (@Nombre, @Tipo, @Criterios, @Hora, @Dias, @Activo);
+        `INSERT INTO dbo.WhatsAppAlarmas (Nombre, Tipo, Criterios, Hora, DiasSemana, Activo, Modo)
+         VALUES (@Nombre, @Tipo, @Criterios, @Hora, @Dias, @Activo, @Modo);
          SELECT SCOPE_IDENTITY() AS Id`
       );
     const id = Number(ins.recordset[0].Id);
@@ -356,10 +548,12 @@ export async function actualizarAlarma(id, datos) {
       .input('Hora', sql.NVarChar(5), limpios.hora)
       .input('Dias', sql.NVarChar(20), limpios.diasSemana)
       .input('Activo', sql.Bit, limpios.activo)
+      .input('Modo', sql.NVarChar(20), limpios.modo)
       .query(
         `UPDATE dbo.WhatsAppAlarmas
             SET Nombre = @Nombre, Tipo = @Tipo, Criterios = @Criterios,
                 Hora = @Hora, DiasSemana = @Dias, Activo = @Activo,
+                Modo = @Modo,
                 ActualizadoAt = SYSDATETIME()
           WHERE Id = @Id`
       );
@@ -453,6 +647,11 @@ function validarDatos(datos) {
   if (!nombre) throw new Error('Nombre obligatorio');
   if (!TIPOS_VALIDOS.includes(tipo)) throw new Error('Tipo de alarma invalido');
 
+  const modo = String(datos?.modo ?? 'DIARIA').toUpperCase();
+  if (!MODOS_VALIDOS.includes(modo)) throw new Error('Modo de ejecucion invalido');
+  if (modo === 'INMEDIATA' && tipo !== 'nueva_factura')
+    throw new Error('El modo INMEDIATA solo aplica a alarmas de nueva factura');
+
   const hora = String(datos?.hora ?? '').trim();
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) throw new Error('Hora invalida (HH:MM)');
 
@@ -471,6 +670,7 @@ function validarDatos(datos) {
   return {
     nombre,
     tipo,
+    modo,
     criterios: validarCriterios(tipo, datos?.criterios ?? {}),
     hora,
     diasSemana: dias,
@@ -497,6 +697,20 @@ function validarCriterios(tipo, c) {
     if (IDEstado !== null && (!Number.isInteger(IDEstado) || IDEstado <= 0))
       throw new Error('Estado no valido');
     return { importeMin, importeMax, IDEstado };
+  }
+  if (tipo === 'pendientes') {
+    const importeMin = num(c.importeMin);
+    const diasMin = num(c.diasMin);
+    const IDEstado = num(c.IDEstado);
+    if (importeMin !== null && (!Number.isFinite(importeMin) || importeMin < 0))
+      throw new Error('Importe minimo no valido');
+    if (diasMin !== null && (!Number.isInteger(diasMin) || diasMin < 0))
+      throw new Error('Antiguedad minima no valida (entero, >= 0)');
+    if (diasMin === 0 && importeMin === null)
+      throw new Error('Obligatorio indicar antiguedad o importe minimo');
+    if (IDEstado !== null && (!Number.isInteger(IDEstado) || IDEstado <= 0))
+      throw new Error('Estado no valido');
+    return { importeMin, diasMin, IDEstado };
   }
   if (tipo === 'resumen_dia') {
     return {

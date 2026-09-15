@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel WhatsApp Workflow</title>
+  <title>Panel de avisos · Maderas José Sáiz</title>
+  <link rel="icon" href="logo.png" />
   <link rel="stylesheet" href="estilos.css" />
 </head>
 <body>
   <div id="pantallaLogin" class="login-wrap">
     <form id="formLogin" class="login-caja">
-      <h1>Panel WhatsApp</h1>
+      <img class="login-logo" src="logo.png" alt="Maderas José Sáiz, S.L." />
+      <h1>Panel de avisos</h1>
+      <h2>Maderas José Sáiz, S.L.</h2>
       <input type="password" id="clave" placeholder="Contraseña" autocomplete="current-password" required />
       <button type="submit">Entrar</button>
       <div id="loginError" class="error"></div>
@@ -18,7 +21,10 @@
 
   <div id="pantallaApp" hidden>
     <header>
-      <h1>Panel WhatsApp Workflow</h1>
+      <div class="caja-titulo">
+        <img class="logo-app" src="logo.png" alt="" />
+        <h1>Panel de avisos · Maderas José Sáiz</h1>
+      </div>
       <nav>
         <button data-vista="cola">Cola de envíos</button>
         <button data-vista="dashboard">Dashboard</button>
@@ -114,8 +120,14 @@
           <input type="text" id="aNombre" placeholder="Nombre de la alarma *" required />
           <select id="aTipo" class="ancho">
             <option value="nueva_factura">Nueva factura con criterios</option>
+            <option value="pendientes">Pendientes / estancadas</option>
             <option value="resumen_dia">Resumen / acumulado a hora</option>
           </select>
+          <select id="aModo" class="ancho">
+            <option value="DIARIA">Diaria (a la hora fijada)</option>
+            <option value="INMEDIATA">Inmediata (aviso al entrar la factura)</option>
+          </select>
+          <span id="aModoNota" class="aviso-barra">El modo inmediato respeta frenos anti-baneo: mín. 15 min entre envíos, 3/hora y 12/día como máximo.</span>
           <div id="criteriosCampos" class="crit-campos"></div>
           <div class="fila">
             <label class="campo">Hora <input type="time" id="aHora" value="23:00" required /></label>
@@ -138,6 +150,7 @@
               <tr>
                 <th>Alarma</th>
                 <th>Tipo</th>
+                <th>Modo</th>
                 <th>Hora</th>
                 <th>Días</th>
                 <th>Destinos</th>

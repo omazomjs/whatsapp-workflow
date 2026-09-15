@@ -43,6 +43,11 @@ export const config = {
     enabled: (process.env.ALARMAS_ENABLED ?? 'true') === 'true',
     intervalSec: Math.max(15, Number(process.env.ALARMAS_INTERVAL_S ?? 60)),
     keepEjecuciones: Number(process.env.ALARMAS_HISTORIAL ?? 200),
+    // Frenos anti-baneo para el modo INMEDIATA: minimo espacio entre envios
+    // automaticos de alarmas y topes por hora y por dia (en total).
+    minEspacioS: Math.max(60, Number(process.env.ALARMAS_MIN_ESPACIO_S ?? 900)),
+    maxPorHora: Math.max(1, Number(process.env.ALARMAS_MAX_HORA ?? 3)),
+    maxPorDia: Math.max(1, Number(process.env.ALARMAS_MAX_DIA ?? 12)),
   },
   whatsapp: {
     sessionDir: process.env.WA_SESSION_DIR ?? 'sessions',

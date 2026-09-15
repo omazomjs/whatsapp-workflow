@@ -1,8 +1,14 @@
 :root {
-  --azul: #1f6feb;
-  --borde: #dcdfe3;
-  --fondo: #f5f6f8;
-  --texto: #1c1e21;
+  --verde: #1c5b2c;
+  --verde-osc: #104023;
+  --verde-med: #1a5c34;
+  --salvia: #ccd9c8;
+  --salvia-claro: #e9efe4;
+  --oliva: #796e01;
+  --wa: #25d366;
+  --borde: #cdd5c7;
+  --fondo: #eef3ea;
+  --texto: #24292f;
   --ok: #1a7f37;
   --mal: #cf222e;
   --aviso: #9a6700;
@@ -22,30 +28,39 @@ body {
 }
 
 header {
-  background: #24292f;
+  background: linear-gradient(135deg, var(--verde-osc), var(--verde));
   color: #fff;
   padding: 10px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  box-shadow: 0 2px 10px rgba(16, 64, 35, 0.35);
 }
 
-header h1 { font-size: 16px; margin: 0; }
+header .caja-titulo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 
-nav { display: flex; gap: 6px; }
+header .logo-app { height: 36px; width: auto; }
+
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+
+nav { display: flex; gap: 6px; flex-wrap: wrap; }
 
 nav button {
   background: transparent;
   border: none;
-  color: #c9d1d9;
+  color: rgba(255, 255, 255, 0.85);
   padding: 6px 12px;
   cursor: pointer;
   border-radius: 6px;
   font-size: 14px;
 }
-nav button:hover { background: #30363d; color: #fff; }
-nav button.activo { background: var(--azul); color: #fff; }
+nav button:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+nav button.activo { background: var(--salvia); color: var(--verde-osc); font-weight: 600; }
 
 main { padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
 
@@ -54,20 +69,23 @@ main { padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
   display: flex;
   align-items: center;
   justify-content: center;
+  background: radial-gradient(circle at 30% 20%, var(--salvia), var(--fondo) 70%);
 }
 
 .login-caja {
   background: #fff;
   border: 1px solid var(--borde);
-  border-radius: 10px;
-  padding: 24px;
-  width: 320px;
+  border-radius: 12px;
+  padding: 26px 28px;
+  width: 340px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 6px 22px rgba(16, 64, 35, 0.18);
 }
-.login-caja h1 { font-size: 18px; margin: 0 0 6px; }
+.login-caja .login-logo { height: 88px; width: auto; align-self: center; margin-bottom: 6px; }
+.login-caja h1 { font-size: 18px; margin: 0 0 6px; color: var(--verde-osc); }
+.login-caja h2 { font-size: 13px; font-weight: 400; margin: -2px 0 6px; color: #57606a; }
 
 input, select, button {
   font: inherit;
@@ -81,12 +99,13 @@ button {
   cursor: pointer;
   background: #fff;
 }
-button:hover { background: #f0f2f4; }
-button[type="submit"], .btn-primario { background: var(--azul); color: #fff; border: 1px solid var(--azul); }
-button[type="submit"]:hover { background: #1967d0; }
+button:hover { background: var(--salvia-claro); }
+button[type="submit"], .btn-primario { background: var(--verde); color: #fff; border: 1px solid var(--verde); }
+button[type="submit"]:hover { background: var(--verde-osc); }
 
 .error { color: var(--mal); font-size: 13px; min-height: 16px; }
 .aviso { color: var(--aviso); }
+.aviso-barra { color: var(--oliva); font-size: 12px; }
 
 .filtros {
   display: flex;
@@ -107,7 +126,7 @@ button[type="submit"]:hover { background: #1967d0; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
-th { background: #f0f2f4; font-weight: 600; white-space: nowrap; }
+th { background: var(--salvia-claro); font-weight: 600; white-space: nowrap; color: var(--verde-osc); }
 tr:last-child td { border-bottom: none; }
 
 .estado { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -115,6 +134,10 @@ tr:last-child td { border-bottom: none; }
 .estado-SENDING { background: #ddf4ff; color: var(--proceso); }
 .estado-SENT { background: #dafbe1; color: var(--ok); }
 .estado-FAILED { background: #ffebe9; color: var(--mal); }
+
+.pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pill-DIARIA { background: #ddf4ff; color: var(--proceso); }
+.pill-INMEDIATA { background: #dcf3e2; color: var(--verde); }
 
 .msg-corto { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -127,11 +150,11 @@ tr:last-child td { border-bottom: none; }
 .tarjeta .txt { color: #57606a; font-size: 13px; }
 .tarjeta.PENDING { border-top: 4px solid var(--aviso); }
 .tarjeta.SENDING { border-top: 4px solid var(--proceso); }
-.tarjeta.SENT { border-top: 4px solid var(--ok); }
+.tarjeta.SENT { border-top: 4px solid var(--verde); }
 .tarjeta.FAILED { border-top: 4px solid var(--mal); }
 
 .panel-salud { background: #fff; border: 1px solid var(--borde); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
-.panel-salud .ok { color: var(--ok); font-weight: 600; }
+.panel-salud .ok { color: var(--verde); font-weight: 600; }
 .panel-salud .mal { color: var(--mal); font-weight: 600; }
 
 .contacto-form {
@@ -141,16 +164,17 @@ tr:last-child td { border-bottom: none; }
   align-items: center;
   background: #fff;
   border: 1px solid var(--borde);
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px;
   margin-bottom: 12px;
+  box-shadow: 0 1px 4px rgba(16, 64, 35, 0.08);
 }
 .contacto-form label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 .modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(16, 64, 35, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -158,14 +182,15 @@ tr:last-child td { border-bottom: none; }
 }
 .modal-caja {
   background: #fff;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 20px;
   max-width: 640px;
   width: 90%;
   max-height: 80vh;
   overflow: auto;
 }
-.modal-caja pre { white-space: pre-wrap; word-break: break-word; background: #f6f8fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+.modal-caja pre { white-space: pre-wrap; word-break: break-word; background: var(--salvia-claro); padding: 12px; border-radius: 8px; font-size: 13px; }
+.modal-caja h3 { margin-top: 0; color: var(--verde-osc); }
 
 button.mini {
   padding: 3px 8px;

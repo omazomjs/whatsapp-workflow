@@ -89,6 +89,20 @@ const MIGRACIONES = [
            ActualizadoAt DATETIME2 NOT NULL DEFAULT SYSDATETIME()
        );
    END;`,
+
+  // Modo de ejecucion de la alarma (DIARIA=resumen a una hora / INMEDIATA=aviso
+  // al detectar movimientos nuevos que cumplen el criterio) y marca de agua
+  // "UltimoUptoAt" (solo avisar de lo aparecido desde la ultima revision).
+  `IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_NAME = N'WhatsAppAlarmas' AND COLUMN_NAME = N'Modo')
+   BEGIN
+       ALTER TABLE dbo.WhatsAppAlarmas ADD Modo NVARCHAR(20) NOT NULL DEFAULT N'DIARIA';
+   END;`,
+  `IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_NAME = N'WhatsAppAlarmas' AND COLUMN_NAME = N'UltimoUptoAt')
+   BEGIN
+       ALTER TABLE dbo.WhatsAppAlarmas ADD UltimoUptoAt DATETIME2 NULL;
+   END;`,
 ];
 
 async function pedirPassword() {
