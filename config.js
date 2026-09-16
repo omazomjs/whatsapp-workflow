@@ -1,12 +1,28 @@
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+
+// Cargar siempre el .env de la raiz del proyecto. Las tareas programadas y
+// scripts de recuperacion pueden iniciar Node desde otro directorio.
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(projectRoot, '.env') });
+
+const dbServerRaw = process.env.DB_SERVER;
+const dbPortRaw = String(process.env.DB_PORT ?? '').trim();
+// Con un puerto explicito no hace falta consultar SQL Browser para resolver
+// NOMBRE_SERVIDOR\INSTANCIA. La conexion directa host:puerto evita timeouts
+// cuando UDP 1434 esta bloqueado, aunque TCP 1433 funcione correctamente.
+const dbServer = dbPortRaw && dbServerRaw?.includes('\\')
+  ? dbServerRaw.split('\\')[0]
+  : dbServerRaw;
 
 export const config = {
   db: {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    server: process.env.DB_SERVER,
+    server: dbServer,
     database: process.env.DB_DATABASE,
-    port: Number(process.env.DB_PORT ?? 1433),
+    port: Number(dbPortRaw || 1433),
     pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
     options: {
       encrypt: (process.env.DB_ENCRYPT ?? 'false') === 'true',

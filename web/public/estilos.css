@@ -191,6 +191,11 @@ tr:last-child td { border-bottom: none; }
 }
 .modal-caja pre { white-space: pre-wrap; word-break: break-word; background: var(--salvia-claro); padding: 12px; border-radius: 8px; font-size: 13px; }
 .modal-caja h3 { margin-top: 0; color: var(--verde-osc); }
+.modal-form { display: grid; gap: 12px; }
+.modal-form label { display: grid; gap: 5px; }
+.modal-form label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.modal-caja-ancha { max-width: 850px; }
+.modal-caja .contacto-form { margin: 0; box-shadow: none; }
 
 button.mini {
   padding: 3px 8px;

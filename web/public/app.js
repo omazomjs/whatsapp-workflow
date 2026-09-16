@@ -2,6 +2,7 @@
   const $ = (sel) => document.querySelector(sel);
 
   let vista = 'cola';
+  let sesionActual = null;
   const estadoCola = { offset: 0, filtros: {} };
 
   const estadoTexto = {
@@ -39,6 +40,32 @@
     return cuerpo;
   }
 
+  let formularioEnModal = null;
+  function abrirFormularioModal(formulario, titulo) {
+    if (formularioEnModal) cerrarFormularioModal();
+    const marca = document.createComment('posicion-formulario');
+    formulario.parentNode.insertBefore(marca, formulario);
+    $('#modalFormularioTitulo').textContent = titulo;
+    $('#modalFormularioCuerpo').appendChild(formulario);
+    $('#modalFormulario').hidden = false;
+    formularioEnModal = { formulario, marca };
+  }
+
+  function cerrarFormularioModal() {
+    if (!formularioEnModal) return;
+    const { formulario, marca } = formularioEnModal;
+    marca.parentNode.insertBefore(formulario, marca);
+    marca.remove();
+    $('#modalFormulario').hidden = true;
+    formularioEnModal = null;
+  }
+
+  $('#modalFormulario').addEventListener('click', (ev) => {
+    if (ev.target === $('#modalFormulario')) {
+      $('#uCancelar:not([hidden]), #aCancelar:not([hidden])')?.click();
+    }
+  });
+
   /* ---------- Login ---------- */
   async function comprobarSesion() {
     const r = await api('/api/sesion');
@@ -69,7 +96,8 @@
     document.location.reload();
   });
 
-  function mostrarApp() {
+  function mostrarApp(sesion) {
+    sesionActual = sesion;
     $('#pantallaLogin').hidden = true;
     $('#pantallaApp').hidden = false;
 
@@ -77,9 +105,8 @@
     $('#btnUsuarios').hidden = !sesion.esAdmin;
 
     if (vista === 'usuarios' && !sesion.esAdmin) vista = 'cola';
+    estadoCola.filtros = leerFiltros();
     cambiarVista(vista);
-    cargarCola();
-    cargarContactos();
   }
 
   /* ---------- Tabs ---------- */
@@ -96,10 +123,12 @@
     $('#vista-dashboard').hidden = nueva !== 'dashboard';
     $('#vista-contactos').hidden = nueva !== 'contactos';
     $('#vista-alarmas').hidden = nueva !== 'alarmas';
+    $('#vista-usuarios').hidden = nueva !== 'usuarios';
     if (nueva === 'dashboard') cargarDashboard();
     if (nueva === 'contactos') cargarContactos();
     if (nueva === 'alarmas') cargarAlarmas();
     if (nueva === 'cola') cargarCola();
+    if (nueva === 'usuarios' && sesionActual?.esAdmin) cargarUsuarios();
   }
 
   /* ---------- Cola ---------- */
@@ -117,8 +146,23 @@
     };
   }
 
+  function parametrosDefinidos(valores) {
+    const p = new URLSearchParams();
+    for (const [clave, valor] of Object.entries(valores)) {
+      if (valor !== undefined && valor !== null && valor !== '') {
+        p.set(clave, String(valor));
+      }
+    }
+    return p;
+  }
+
   function urlCola(extra = {}) {
-    const p = new URLSearchParams({ ...estadoCola.filtros, limit: 50, offset: estadoCola.offset, ...extra });
+    const p = parametrosDefinidos({
+      ...estadoCola.filtros,
+      limit: 50,
+      offset: estadoCola.offset,
+      ...extra,
+    });
     return `/api/outbox?${p.toString()}`;
   }
 
@@ -130,6 +174,9 @@
       $('#colaLote').textContent = `mostrando ${r.registros.length} de ${r.total}`;
       const tb = $('#colaLlaves');
       tb.innerHTML = '';
+      if (!r.registros.length) {
+        tb.innerHTML = '<tr><td colspan="7">No hay envíos que coincidan con los filtros seleccionados.</td></tr>';
+      }
       for (const fila of r.registros) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -200,7 +247,7 @@
   $('#modalCerrar').addEventListener('click', () => ($('#modal').hidden = true));
 
   $('#btnCsv').addEventListener('click', () => {
-    const p = new URLSearchParams({ ...leerFiltros() });
+    const p = parametrosDefinidos(leerFiltros());
     window.open(`/api/exportar.csv?${p.toString()}`, '_blank');
   });
 
@@ -279,13 +326,16 @@
   }
 
   /* ---------- Contactos ---------- */
+  let contactosCache = [];
+
   async function cargarContactos() {
     try {
       const r = await api('/api/contactos?buscar=&todos=1');
       if (!r) return;
       const tb = $('#contactosLlaves');
+      contactosCache = r.registros ?? [];
       tb.innerHTML = '';
-      for (const c of r.registros) {
+      for (const c of contactosCache) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${c.Nombre}</td>
@@ -343,18 +393,16 @@
     const id = btn.dataset.id;
     if (btn.dataset.accion === 'editar') {
       try {
-        const r = await api('/api/contactos?todos=1');
-        const c = r.registros.find((x) => x.Id === Number(id));
-        if (!c) return;
-        $('#cId').value = c.Id;
-        $('#cNombre').value = c.Nombre;
-        $('#cTelefono').value = c.Telefono;
-        $('#cResumen').checked = Boolean(c.EsResumen);
-        $('#cNotas').value = c.Notas || '';
-        $('#cActivo').checked = Boolean(c.Activo);
-        $('#cGuardar').textContent = 'Guardar';
-        $('#cCancelar').hidden = false;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const c = contactosCache.find((x) => String(x.Id) === String(id));
+        if (!c) throw new Error('No se ha encontrado el contacto. Actualiza la lista.');
+        $('#eId').value = c.Id;
+        $('#eNombre').value = c.Nombre;
+        $('#eTelefono').value = c.Telefono;
+        $('#eResumen').checked = Boolean(c.EsResumen);
+        $('#eNotas').value = c.Notas || '';
+        $('#eActivo').checked = Boolean(c.Activo);
+        $('#modalContacto').hidden = false;
+        $('#eNombre').focus();
       } catch (err) {
         alert(err.message);
       }
@@ -363,6 +411,135 @@
       try {
         await api(`/api/contactos/${id}`, { method: 'DELETE' });
         cargarContactos();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+  });
+
+  /* ---------- Usuarios (solo administradores) ---------- */
+  let usuariosCache = [];
+
+  async function cargarUsuarios() {
+    try {
+      const r = await api('/api/usuarios');
+      if (!r) return;
+      usuariosCache = Array.isArray(r) ? r : [];
+      const tb = $('#usuariosLlaves');
+      tb.innerHTML = '';
+      if (!usuariosCache.length) {
+        tb.innerHTML = '<tr><td colspan="6">No hay usuarios.</td></tr>';
+      }
+      for (const u of usuariosCache) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${String(u.Usuario ?? '').replace(/</g, '&lt;')}</td>
+          <td>${String(u.Nombre ?? '').replace(/</g, '&lt;')}</td>
+          <td>${u.EsAdmin ? '✔' : ''}</td>
+          <td>${u.Activo ? '✔' : ''}</td>
+          <td>${fechaLocal(u.CreadoAt)}</td>
+          <td>
+            <button class="mini" data-id="${u.Id}" data-accion="editar">Editar</button>
+            ${u.Usuario !== sesionActual?.usuario ? `<button class="mini rojo" data-id="${u.Id}" data-accion="borrar">Desactivar</button>` : ''}
+          </td>`;
+        tb.appendChild(tr);
+      }
+    } catch (err) {
+      $('#usuariosLlaves').innerHTML = `<tr><td colspan="6" class="error">${err.message}</td></tr>`;
+    }
+  }
+
+  function reiniciarFormUsuario() {
+    $('#formUsuario').reset();
+    $('#uId').value = '';
+    $('#uUsuario').disabled = false;
+    $('#uClave').required = true;
+    $('#uActivo').checked = true;
+    $('#uAdmin').checked = false;
+    $('#uGuardar').textContent = 'Añadir';
+    $('#uCancelar').hidden = true;
+    cerrarFormularioModal();
+  }
+
+  $('#uCancelar').addEventListener('click', reiniciarFormUsuario);
+
+  $('#formUsuario').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const id = $('#uId').value;
+    const cuerpo = {
+      usuario: $('#uUsuario').value.trim(),
+      nombre: $('#uNombre').value.trim(),
+      clave: $('#uClave').value,
+      esAdmin: $('#uAdmin').checked,
+      activo: $('#uActivo').checked,
+    };
+    try {
+      await api(`/api/usuarios${id ? '/' + id : ''}`, {
+        method: id ? 'PUT' : 'POST',
+        body: JSON.stringify(cuerpo),
+      });
+      reiniciarFormUsuario();
+      cargarUsuarios();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  function cerrarModalContacto() {
+    $('#modalContacto').hidden = true;
+    $('#formEditarContacto').reset();
+    $('#eId').value = '';
+  }
+
+  $('#eCancelar').addEventListener('click', cerrarModalContacto);
+  $('#modalContacto').addEventListener('click', (ev) => {
+    if (ev.target === $('#modalContacto')) cerrarModalContacto();
+  });
+
+  $('#formEditarContacto').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const id = $('#eId').value;
+    try {
+      await api(`/api/contactos/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          nombre: $('#eNombre').value.trim(),
+          telefono: $('#eTelefono').value.trim(),
+          esResumen: $('#eResumen').checked,
+          notas: $('#eNotas').value.trim(),
+          activo: $('#eActivo').checked,
+        }),
+      });
+      cerrarModalContacto();
+      cargarContactos();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  $('#usuariosLlaves').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button[data-accion]');
+    if (!btn) return;
+    const u = usuariosCache.find((x) => String(x.Id) === String(btn.dataset.id));
+    if (btn.dataset.accion === 'editar') {
+      if (!u) return;
+      $('#uId').value = u.Id;
+      $('#uUsuario').value = u.Usuario;
+      $('#uUsuario').disabled = true;
+      $('#uNombre').value = u.Nombre ?? '';
+      $('#uClave').value = '';
+      $('#uClave').required = false;
+      $('#uAdmin').checked = Boolean(u.EsAdmin);
+      $('#uActivo').checked = Boolean(u.Activo);
+      $('#uGuardar').textContent = 'Guardar';
+      $('#uCancelar').hidden = false;
+      abrirFormularioModal($('#formUsuario'), `Editar usuario · ${u.Usuario}`);
+      $('#uNombre').focus();
+    } else if (btn.dataset.accion === 'borrar') {
+      if (!u || !confirm(`¿Desactivar el usuario ${u.Usuario}?`)) return;
+      try {
+        await api(`/api/usuarios/${u.Id}`, { method: 'DELETE' });
+        cargarUsuarios();
       } catch (err) {
         alert(err.message);
       }
@@ -400,8 +577,16 @@
         <label class="campo">Estado <select id="ciEstado"><option value="">Todos</option></select></label>`;
     } else if (tipo === 'pendientes') {
       c.innerHTML = `
-        <div class="fila"><label class="campo">Importe mín. <input type="number" id="ciPImporteMin" min="0" step="0.01" placeholder="—"/></label>
-          <label class="campo">Antigüedad mín. (días) <input type="number" id="ciPDias" min="0" step="1" placeholder="—"/></label></div>
+        <div class="fila">
+          <label class="campo">Importe
+            <select id="ciPImporteOp"><option>&gt;=</option><option>&gt;</option><option>=</option><option>&lt;</option><option>&lt;=</option></select>
+            <input type="number" id="ciPImporteValor" min="0" step="0.01" placeholder="—"/>
+          </label>
+          <label class="campo">Días en estado
+            <select id="ciPDiasOp"><option>&gt;=</option><option>&gt;</option><option>=</option><option>&lt;</option><option>&lt;=</option></select>
+            <input type="number" id="ciPDiasValor" min="0" step="1" placeholder="—"/>
+          </label>
+        </div>
         <label class="campo">Estado <select id="ciEstado"><option value="">Todos</option></select></label>`;
     } else if (tipo === 'resumen_dia') {
       c.innerHTML = `
@@ -432,13 +617,15 @@
         IDEstado: est === '' ? null : Number(est),
       };
     }
-if (tipo === 'pendientes') {
-      const min = $('#ciPImporteMin')?.value?.trim() ?? '';
-      const dias = $('#ciPDias')?.value?.trim() ?? '';
+    if (tipo === 'pendientes') {
+      const importe = $('#ciPImporteValor')?.value?.trim() ?? '';
+      const dias = $('#ciPDiasValor')?.value?.trim() ?? '';
       const est = $('#ciEstado')?.value ?? '';
       return {
-        importeMin: min === '' ? null : Number(min),
-        diasMin: dias === '' ? null : Number(dias),
+        importeOp: $('#ciPImporteOp')?.value ?? '>=',
+        importeValor: importe === '' ? null : Number(importe),
+        diasOp: $('#ciPDiasOp')?.value ?? '>=',
+        diasValor: dias === '' ? null : Number(dias),
         IDEstado: est === '' ? null : Number(est),
       };
     }
@@ -503,6 +690,7 @@ if (tipo === 'pendientes') {
     setDestinosForm([]);
     $('#aActivo').checked = true;
     document.querySelectorAll('#aDias input[type=checkbox]').forEach(el => { el.disabled = false; });
+    cerrarFormularioModal();
   }
 
   $('#aCancelar').addEventListener('click', reiniciarFormAlarma);
@@ -634,8 +822,10 @@ if (tipo === 'pendientes') {
         }
         if (a.Tipo === 'pendientes') {
           rellenarEstadosSelect();
-          $('#ciPImporteMin').value = a.criterios.importeMin ?? '';
-          $('#ciPDias').value = a.criterios.diasMin ?? '';
+          $('#ciPImporteOp').value = a.criterios.importeOp ?? '>=';
+          $('#ciPImporteValor').value = a.criterios.importeValor ?? a.criterios.importeMin ?? '';
+          $('#ciPDiasOp').value = a.criterios.diasOp ?? '>=';
+          $('#ciPDiasValor').value = a.criterios.diasValor ?? a.criterios.diasMin ?? '';
           $('#ciEstado').value = a.criterios.IDEstado ?? '';
         }
         if (a.Tipo === 'resumen_dia') {
@@ -648,7 +838,8 @@ if (tipo === 'pendientes') {
         $('#aActivo').checked = a.Activo;
         $('#aGuardar').textContent = 'Guardar';
         $('#aCancelar').hidden = false;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        abrirFormularioModal($('#formAlarma'), `Editar alarma · ${a.Nombre}`);
+        $('#aNombre').focus();
       } catch (err) {
         alert(err.message);
       }
@@ -671,7 +862,7 @@ if (tipo === 'pendientes') {
         $('#aActivo').checked = r.enabled;
         $('#aGuardar').textContent = 'Guardar';
         $('#aCancelar').hidden = false;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        abrirFormularioModal($('#formAlarma'), 'Configurar resumen diario');
       } catch (err) {
         alert(err.message);
       }

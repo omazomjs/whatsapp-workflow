@@ -31,16 +31,36 @@ import {
 } from '../src/alarmas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, '..');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-const esTls = Boolean(
-  config.web.tlsCert &&
-    config.web.tlsKey &&
-    fs.existsSync(config.web.tlsCert) &&
-    fs.existsSync(config.web.tlsKey)
-);
+function rutaProyecto(valor) {
+  if (!valor) return '';
+  return path.isAbsolute(valor) ? valor : path.resolve(projectRoot, valor);
+}
+
+// Si no se indican rutas en .env, usamos la ubicacion convencional del
+// despliegue. Esto permite conservar los certificados al actualizar el codigo.
+const tlsCert = rutaProyecto(config.web.tlsCert || 'certs/server.crt');
+const tlsKey = rutaProyecto(config.web.tlsKey || 'certs/server.key');
+const tlsSolicitado = Boolean(config.web.tlsCert || config.web.tlsKey);
+const certExiste = fs.existsSync(tlsCert);
+const keyExiste = fs.existsSync(tlsKey);
+
+if (tlsSolicitado && (!certExiste || !keyExiste)) {
+  const faltan = [
+    !certExiste ? `certificado: ${tlsCert}` : null,
+    !keyExiste ? `clave: ${tlsKey}` : null,
+  ].filter(Boolean);
+  throw new Error(
+    `[Web] HTTPS configurado, pero faltan archivos (${faltan.join('; ')}). ` +
+      'Se cancela el arranque para no publicar el panel accidentalmente por HTTP.'
+  );
+}
+
+const esTls = certExiste && keyExiste;
 
 const secret =
   config.web.sessionSecret || crypto.randomBytes(32).toString('hex');
@@ -156,7 +176,20 @@ app.post('/api/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-app.get('/api/sesion', (req, res) => {
+app.get('/api/sesion', async (req, res) => {
+  // Refrescar los permisos desde BD para que un cambio de rol se refleje al
+  // recargar la pagina, sin conservar una sesion antigua hasta 8 horas.
+  if (req.session.autorizado && req.session.usuario && req.session.usuario !== 'root') {
+    try {
+      const fila = await buscarUsuarioPorNombre(req.session.usuario);
+      if (fila) {
+        req.session.nombre = fila.Nombre ?? fila.Usuario;
+        req.session.esAdmin = Boolean(fila.EsAdmin);
+      }
+    } catch (err) {
+      console.error('[Sesion] No se pudieron refrescar permisos:', err.message);
+    }
+  }
   res.json({
     logueado: Boolean(req.session.autorizado),
     usuario: req.session.usuario ?? null,
@@ -243,6 +276,10 @@ function likeInput(valor) {
   return { name: 'Valor', value: `%${valor}%` };
 }
 
+function fechaIsoValida(valor) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(valor ?? ''));
+}
+
 app.get('/api/outbox', requiereSesion, async (req, res) => {
   try {
     const { status, desde, hasta, telefono, buscar, limit = 50, offset = 0 } = req.query;
@@ -256,11 +293,11 @@ app.get('/api/outbox', requiereSesion, async (req, res) => {
       where.push('Status = @Status');
       inputs.push({ name: 'Status', value: String(status) });
     }
-    if (desde) {
+    if (fechaIsoValida(desde)) {
       where.push('CreatedAt >= @Desde');
       inputs.push({ name: 'Desde', value: new Date(desde) });
     }
-    if (hasta) {
+    if (fechaIsoValida(hasta)) {
       where.push('CreatedAt < DATEADD(DAY, 1, @Hasta)');
       inputs.push({ name: 'Hasta', value: new Date(hasta) });
     }
@@ -644,11 +681,11 @@ app.get('/api/exportar.csv', requiereSesion, async (req, res) => {
       where.push('Status = @Status');
       inputs.push({ name: 'Status', value: String(status) });
     }
-    if (desde) {
+    if (fechaIsoValida(desde)) {
       where.push('CreatedAt >= @Desde');
       inputs.push({ name: 'Desde', value: new Date(desde) });
     }
-    if (hasta) {
+    if (fechaIsoValida(hasta)) {
       where.push('CreatedAt < DATEADD(DAY, 1, @Hasta)');
       inputs.push({ name: 'Hasta', value: new Date(hasta) });
     }
@@ -700,8 +737,8 @@ if (esTls) {
   https
     .createServer(
       {
-        key: fs.readFileSync(config.web.tlsKey),
-        cert: fs.readFileSync(config.web.tlsCert),
+        key: fs.readFileSync(tlsKey),
+        cert: fs.readFileSync(tlsCert),
       },
       app
     )
@@ -709,6 +746,7 @@ if (esTls) {
       console.log(
         `[Web] Panel HTTPS en https://localhost:${config.web.httpsPort}  (o https://IP-DEL-SERVIDOR:${config.web.httpsPort})`
       );
+      console.log(`[Web] Certificado TLS: ${tlsCert}`);
     });
 } else {
   app.listen(config.web.port, '0.0.0.0', () => {

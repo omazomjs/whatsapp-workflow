@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Panel de avisos · Maderas José Sáiz</title>
   <link rel="icon" href="logo.png" />
-  <link rel="stylesheet" href="estilos.css" />
+  <link rel="stylesheet" href="estilos.css?v=20260916-3" />
 </head>
 <body>
   <div id="pantallaLogin" class="login-wrap">
@@ -13,7 +13,7 @@
       <img class="login-logo" src="logo.png" alt="Maderas José Sáiz, S.L." />
       <h1>Panel de avisos</h1>
       <h2>Maderas José Sáiz, S.L.</h2>
-      <input type="text" id="usuario" placeholder="Usuario (opcional)" autocomplete="username" />
+      <input type="text" id="usuario" placeholder="Usuario" autocomplete="username" required />
       <input type="password" id="clave" placeholder="Contraseña" autocomplete="current-password" required />
       <button type="submit">Entrar</button>
       <div id="loginError" class="error"></div>
@@ -164,6 +164,35 @@
           </table>
         </div>
       </section>
+
+      <!-- VISTA USUARIOS (solo administradores) -->
+      <section id="vista-usuarios" class="vista" hidden>
+        <form id="formUsuario" class="contacto-form">
+          <input type="hidden" id="uId" />
+          <input type="text" id="uUsuario" placeholder="Usuario *" autocomplete="off" required />
+          <input type="text" id="uNombre" placeholder="Nombre *" required />
+          <input type="password" id="uClave" placeholder="Contraseña (mínimo 7 caracteres) *" autocomplete="new-password" minlength="7" required />
+          <label><input type="checkbox" id="uAdmin" /> Administrador</label>
+          <label><input type="checkbox" id="uActivo" checked /> Activo</label>
+          <button type="submit" id="uGuardar">Añadir</button>
+          <button type="button" id="uCancelar" hidden>Cancelar</button>
+        </form>
+        <div class="tabla-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Nombre</th>
+                <th>Admin</th>
+                <th>Activo</th>
+                <th>Creado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="usuariosLlaves"></tbody>
+          </table>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -175,6 +204,31 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <div id="modalContacto" class="modal" hidden>
+    <div class="modal-caja">
+      <h3>Editar contacto</h3>
+      <form id="formEditarContacto" class="modal-form">
+        <input type="hidden" id="eId" />
+        <label>Nombre <input type="text" id="eNombre" required /></label>
+        <label>Teléfono <input type="tel" id="eTelefono" required /></label>
+        <label>Notas <input type="text" id="eNotas" /></label>
+        <label><input type="checkbox" id="eResumen" /> Destinatario del resumen</label>
+        <label><input type="checkbox" id="eActivo" /> Activo</label>
+        <div class="fila">
+          <button type="submit">Guardar cambios</button>
+          <button type="button" id="eCancelar">Cancelar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modalFormulario" class="modal" hidden>
+    <div class="modal-caja modal-caja-ancha">
+      <h3 id="modalFormularioTitulo">Editar</h3>
+      <div id="modalFormularioCuerpo"></div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260916-5"></script>
 </body>
 </html>

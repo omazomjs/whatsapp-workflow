@@ -4,6 +4,7 @@ logs/
 sessions/
 .wwebjs_auth/
 qr/
+certs/
 *.log
 Thumbs.db
 Desktop.ini

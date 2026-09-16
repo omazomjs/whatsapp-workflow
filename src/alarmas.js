@@ -93,6 +93,11 @@ function fmtHoraMin(date) {
   return `${p(date.getHours())}:${p(date.getMinutes())}`;
 }
 
+function operadorSeguro(valor, predeterminado = '>=') {
+  const op = String(valor ?? predeterminado);
+  return ['>', '<', '=', '>=', '<='].includes(op) ? op : predeterminado;
+}
+
 async function estadoDescripcion(pool, idEstado) {
   if (idEstado == null) return null;
   const er = await pool
@@ -150,21 +155,24 @@ async function evaluarNuevaFactura(criterios) {
 }
 
 async function evaluarPendientes(criterios) {
+  const importeValor = criterios.importeValor ?? criterios.importeMin ?? null;
+  const diasValor = criterios.diasValor ?? criterios.diasMin ?? null;
+  const importeOp = operadorSeguro(criterios.importeOp);
+  const diasOp = operadorSeguro(criterios.diasOp);
   const pool = await getPool();
   const r = await pool
     .request()
     .input('IDEstado', sql.Int, criterios.IDEstado ?? null)
-    .input('ImporteMin', sql.Float, criterios.importeMin ?? null)
-    .input('DiasMin', sql.Int, Number(criterios.diasMin) || 0)
+    .input('ImporteValor', sql.Float, importeValor)
+    .input('DiasValor', sql.Int, diasValor)
     .query(
       `SELECT COUNT(*) AS N, ISNULL(SUM(Importe), 0) AS Suma,
-              MIN(AudiFecha) AS MasAntigua,
-              MAX(DATEDIFF(day, AudiFecha, GETDATE())) AS DiasMax
+              MAX(ISNULL([Dias], 0)) AS DiasMax
          FROM [REFact].dbo.Registro
         WHERE Borrado = 0
           AND (@IDEstado IS NULL OR Estado = @IDEstado)
-          AND (@ImporteMin IS NULL OR Importe >= @ImporteMin)
-          AND DATEDIFF(day, AudiFecha, GETDATE()) >= @DiasMin`
+          AND (@ImporteValor IS NULL OR Importe ${importeOp} @ImporteValor)
+          AND (@DiasValor IS NULL OR [Dias] ${diasOp} @DiasValor)`
     );
 
   const fila = r.recordset[0];
@@ -175,9 +183,8 @@ async function evaluarPendientes(criterios) {
 
   const filtros = [];
   if (estadoDesc) filtros.push(`estado ${estadoDesc}`);
-  if (criterios.importeMin != null) filtros.push(`importe >= ${fmtEuro(criterios.importeMin)}`);
-  if ((Number(criterios.diasMin) || 0) > 0)
-    filtros.push(`antiguedad >= ${Number(criterios.diasMin)} dias`);
+  if (importeValor != null) filtros.push(`importe ${importeOp} ${fmtEuro(importeValor)}`);
+  if (diasValor != null) filtros.push(`dias en estado ${diasOp} ${Number(diasValor)}`);
 
   const lineas = [`FACTURAS ESTANCADAS - ${fechaCorta(new Date())}`];
   if (filtros.length) {
@@ -186,11 +193,7 @@ async function evaluarPendientes(criterios) {
   }
   lineas.push('');
   lineas.push(`ENCONTRADAS: ${n} - ${fmtEuro(fila.Suma)}`);
-  if (fila.MasAntigua) {
-    const fecha = new Date(fila.MasAntigua).toLocaleDateString('es-ES');
-    const dias = fila.DiasMax != null ? ` (${Number(fila.DiasMax)} dias)` : '';
-    lineas.push(`Mas antigua: ${fecha}${dias}`);
-  }
+  if (fila.DiasMax != null) lineas.push(`Mayor permanencia: ${Number(fila.DiasMax)} dias`);
 
   return { enviar: true, mensaje: lineas.join('\n') };
 }
@@ -699,18 +702,20 @@ function validarCriterios(tipo, c) {
     return { importeMin, importeMax, IDEstado };
   }
   if (tipo === 'pendientes') {
-    const importeMin = num(c.importeMin);
-    const diasMin = num(c.diasMin);
+    const importeValor = num(c.importeValor ?? c.importeMin);
+    const diasValor = num(c.diasValor ?? c.diasMin);
+    const importeOp = operadorSeguro(c.importeOp);
+    const diasOp = operadorSeguro(c.diasOp);
     const IDEstado = num(c.IDEstado);
-    if (importeMin !== null && (!Number.isFinite(importeMin) || importeMin < 0))
-      throw new Error('Importe minimo no valido');
-    if (diasMin !== null && (!Number.isInteger(diasMin) || diasMin < 0))
-      throw new Error('Antiguedad minima no valida (entero, >= 0)');
-    if (diasMin === 0 && importeMin === null)
-      throw new Error('Obligatorio indicar antiguedad o importe minimo');
+    if (importeValor !== null && (!Number.isFinite(importeValor) || importeValor < 0))
+      throw new Error('Importe no valido');
+    if (diasValor !== null && (!Number.isInteger(diasValor) || diasValor < 0))
+      throw new Error('Dias en estado no validos (entero, >= 0)');
+    if (diasValor === null && importeValor === null)
+      throw new Error('Obligatorio indicar dias en estado o importe');
     if (IDEstado !== null && (!Number.isInteger(IDEstado) || IDEstado <= 0))
       throw new Error('Estado no valido');
-    return { importeMin, diasMin, IDEstado };
+    return { importeOp, importeValor, diasOp, diasValor, IDEstado };
   }
   if (tipo === 'resumen_dia') {
     return {

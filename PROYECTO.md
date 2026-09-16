@@ -11,6 +11,17 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 
 ## Bitácora
 
+- **16/09 — Recuperación de HTTPS preparada (pendiente de desplegar en INFOSERVER07)**:
+  - Confirmado desde el PC: `http://192.168.1.223:3000/api/health` responde 200 y `https://192.168.1.223:3443/api/health` no responde.
+  - `web/server.js` resuelve las rutas TLS relativas desde la raíz del proyecto y activa HTTPS automáticamente si conserva `certs/server.crt` + `certs/server.key`.
+  - Si `WEB_SSL_CERT`/`WEB_SSL_KEY` están configuradas pero los archivos no existen, el arranque falla con un mensaje explícito; ya no degrada silenciosamente a HTTP.
+  - Añadido `comprobar_https.ps1` para validar rutas y puerto sin mostrar secretos. `certs/` queda excluido de Git.
+  - Verificación local: HTTP 200, HTTPS 200 con certificado temporal, HSTS presente y `npm run check` correcto.
+  - Desplegado después en INFOSERVER07 y comprobado desde otro equipo: HTTPS 200, HSTS activo y HTTP 3000 cerrado.
+  - Corregida la carga inicial del panel (`mostrarApp(sesion)`), filtros vacíos de la cola, edición de contactos en modal y gestión completa de Usuarios para administradores.
+  - Los botones Editar/Configurar de Contactos, Alarmas y Usuarios abren ventanas emergentes.
+  - El evaluador `pendientes` usa ahora `REFact.dbo.Registro.Dias` (días en el estado), no `DATEDIFF` sobre `AudiFecha`, y admite operadores `>`, `<`, `=`, `>=` y `<=` para importe y días.
+
 - **15/09 — Fase 1b (segunda pasada)**: 
   - **Bug "Configurar" del RESUMEN DIARIO en producción**: daba 404 porque `web/server.js` no se había desplegado en la pasada anterior (solo se copiaron `web/public`, `src` y `config.js`). Corregido copiando `web/server.js` (con la ruta `/api/config/resumen` y el fix `[Key]` de `database.js`) y reiniciando la tarea `WhatsAppWeb`. Verificado: `/api/config/resumen` responde ahora 401 (ruta activa) en lugar de 404.
   - **Branding corporativo** desplegado en el panel: logo (`web/public/logo.png`, bajado de maderasjosesaiz.es), paleta verde bosque (`#104023`/`#1c5b2c`/`#ccd9c8`), título "Panel de avisos · Maderas José Sáiz", favicon. Sin CDN ni dependencias externas.

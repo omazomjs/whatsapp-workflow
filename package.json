@@ -11,7 +11,7 @@
     "test-alarmas": "node src/test-alarmas.js",
     "migrar": "node src/migrar.js",
     "web": "node web/server.js",
-    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/database.js && node --check src/outbox.js && node --check src/ingest.js && node --check src/resumen.js && node --check src/prompt.js && node --check src/alarmas.js && node --check src/test-resumen.js && node --check src/test-alarmas.js && node --check src/migrar.js && node --check config.js && node --check web/server.js"
+    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/database.js && node --check src/outbox.js && node --check src/ingest.js && node --check src/resumen.js && node --check src/prompt.js && node --check src/alarmas.js && node --check src/test-resumen.js && node --check src/test-alarmas.js && node --check src/migrar.js && node --check config.js && node --check web/server.js && node --check web/public/app.js"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
