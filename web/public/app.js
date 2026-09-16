@@ -104,6 +104,10 @@
     // La pestaña "Usuarios" solo la ven los administradores.
     $('#btnUsuarios').hidden = !sesion.esAdmin;
 
+    // El manual de administración solo lo ven dfueyo y omazo.
+    const adminManual = ['dfueyo', 'omazo'].includes(String(sesion.usuario ?? '').toLowerCase());
+    $('#btnManualAdmin').hidden = !adminManual;
+
     if (vista === 'usuarios' && !sesion.esAdmin) vista = 'cola';
     estadoCola.filtros = leerFiltros();
     cambiarVista(vista);
@@ -440,7 +444,10 @@
           <td>${fechaLocal(u.CreadoAt)}</td>
           <td>
             <button class="mini" data-id="${u.Id}" data-accion="editar">Editar</button>
-            ${u.Usuario !== sesionActual?.usuario ? `<button class="mini rojo" data-id="${u.Id}" data-accion="borrar">Desactivar</button>` : ''}
+            ${u.Usuario !== sesionActual?.usuario
+              ? `<button class="mini rojo" data-id="${u.Id}" data-accion="borrar">Desactivar</button>
+                 <button class="mini rojo" data-id="${u.Id}" data-accion="borrarD">Borrar</button>`
+              : ''}
           </td>`;
         tb.appendChild(tr);
       }
@@ -539,6 +546,21 @@
       if (!u || !confirm(`¿Desactivar el usuario ${u.Usuario}?`)) return;
       try {
         await api(`/api/usuarios/${u.Id}`, { method: 'DELETE' });
+        cargarUsuarios();
+      } catch (err) {
+        alert(err.message);
+      }
+    } else if (btn.dataset.accion === 'borrarD') {
+      if (!u) return;
+      const ok = confirm(
+        `¿BORRAR DEFINITIVAMENTE a ${u.Usuario}?\n\nEsta accion elimina el usuario de la base de datos y no se puede deshacer.`
+      );
+      if (!ok) return;
+      try {
+        await api(`/api/usuarios/${u.Id}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ definitivo: true }),
+        });
         cargarUsuarios();
       } catch (err) {
         alert(err.message);

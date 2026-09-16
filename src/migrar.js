@@ -104,7 +104,7 @@ CREATE TABLE dbo.WhatsAppConfig (
        ALTER TABLE dbo.WhatsAppAlarmas ADD UltimoUptoAt DATETIME2 NULL;
    END;`,
 
-  // Usuarios del panel: cada persona (p. ej. la jefa) puede tener su propio
+  // Usuarios del panel: cada persona de la empresa puede tener su propio
   // usuario y contraseña. La clave se guarda como hash scrypt (sal:hash), nunca
   // en texto plano. EsAdmin marca quién puede gestionar usuarios.
   `IF OBJECT_ID('dbo.WhatsAppUsuarios', 'U') IS NULL

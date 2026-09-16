@@ -301,3 +301,26 @@ export async function eliminarUsuario(id) {
         WHERE Id = @i`
     );
 }
+
+export async function buscarUsuarioPorId(id) {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('i', sql.Int, id)
+    .query(
+      `SELECT Id, Usuario, Nombre,
+              CASE WHEN EsAdmin = 1 THEN 1 ELSE 0 END AS EsAdmin
+         FROM dbo.${USUARIOS_TABLE}
+        WHERE Id = @i`
+    );
+  return r.recordset.length ? r.recordset[0] : null;
+}
+
+// Borrado definitivo (sin vuelta atras). Solo administradores.
+export async function borrarUsuarioDefinitivo(id) {
+  const pool = await getPool();
+  return pool
+    .request()
+    .input('i', sql.Int, id)
+    .query(`DELETE FROM dbo.${USUARIOS_TABLE} WHERE Id = @i`);
+}

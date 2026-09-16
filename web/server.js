@@ -17,6 +17,8 @@ import {
   crearUsuario,
   actualizarUsuario,
   eliminarUsuario,
+  borrarUsuarioDefinitivo,
+  buscarUsuarioPorId,
   verificarClave,
 } from '../src/database.js';
 import { normalizeNumber } from '../src/outbox.js';
@@ -87,6 +89,30 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Manual de usuario (PDF) — solo con sesion iniciada.
+const rutaManual = path.join(projectRoot, 'MANUAL_PANEL.pdf');
+app.get('/manual.pdf', requiereSesion, (req, res) => {
+  if (!fs.existsSync(rutaManual))
+    return res.status(404).json({ error: 'El manual no esta disponible' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="MANUAL_PANEL.pdf"');
+  res.sendFile(rutaManual);
+});
+
+// Manual de administración — solo dfueyo y omazo.
+const ADMIN_MANUAL_USERS = ['dfueyo', 'omazo'];
+const rutaManualAdmin = path.join(projectRoot, 'MANUAL_ADMIN.pdf');
+app.get('/manual-admin.pdf', requiereSesion, (req, res) => {
+  const usuario = String(req.session.usuario ?? '').toLowerCase();
+  if (!ADMIN_MANUAL_USERS.includes(usuario))
+    return res.status(403).json({ error: 'No tienes acceso a este documento' });
+  if (!fs.existsSync(rutaManualAdmin))
+    return res.status(404).json({ error: 'El manual no esta disponible' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="MANUAL_ADMIN.pdf"');
+  res.sendFile(rutaManualAdmin);
+});
+
 function requiereSesion(req, res, next) {
   if (req.session.autorizado) return next();
   res.status(401).json({ error: 'No autenticado' });
@@ -112,13 +138,13 @@ app.post('/api/login', async (req, res) => {
   const user = String(req.body?.user ?? '').trim();
 
   // El ID de usuario es obligatorio desde el 15/9/2026: sin él no se entra,
-  // aunque la clave sea correcta. (La jefa, Oscar y cualquiera van a tener
+  // aunque la clave sea correcta. (Oscar, Itxaso y cualquiera van a tener
   // su propio usuario creado desde la pestaña Usuarios.)
   if (!user) {
     return res.status(400).json({ error: 'Debes escribir tu ID de usuario' });
   }
 
-  // 1) Login de usuario real de la tabla WhatsAppUsuarios (la jefa, etc.).
+  // 1) Login de usuario real de la tabla WhatsAppUsuarios.
   //    Si el campo usuario no viene vacío y existe un registro activo,
   //    validamos la clave con scrypt (nunca se compara en texto plano).
   let sesion = null;
@@ -257,8 +283,17 @@ app.put('/api/usuarios/:id', requiereSesion, async (req, res) => {
 app.delete('/api/usuarios/:id', requiereSesion, async (req, res) => {
   if (!esAdmin(req)) return res.status(403).json({ error: 'No eres administrador' });
   const id = Number(req.params.id);
+  const definitivo = Boolean(req.body?.definitivo);
   try {
-    await eliminarUsuario(id);
+    if (definitivo) {
+      const objetivo = await buscarUsuarioPorId(id);
+      if (!objetivo) return res.status(404).json({ error: 'El usuario no existe' });
+      if (String(objetivo.Usuario) === String(req.session.usuario ?? ''))
+        return res.status(400).json({ error: 'No puedes borrar tu propio usuario' });
+      await borrarUsuarioDefinitivo(id);
+    } else {
+      await eliminarUsuario(id);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo eliminar el usuario' });
