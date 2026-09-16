@@ -82,9 +82,9 @@ const MIGRACIONES = [
   // Parametros editables desde el panel (ej: config del resumen diario).
   `IF OBJECT_ID('dbo.WhatsAppConfig', 'U') IS NULL
    BEGIN
-       CREATE TABLE dbo.WhatsAppConfig (
-           Key   NVARCHAR(100) PRIMARY KEY,
-           Value NVARCHAR(500) NOT NULL,
+CREATE TABLE dbo.WhatsAppConfig (
+            [Key] NVARCHAR(100) PRIMARY KEY,
+            [Value] NVARCHAR(500) NOT NULL,
            CreadoAt      DATETIME2 NOT NULL DEFAULT SYSDATETIME(),
            ActualizadoAt DATETIME2 NOT NULL DEFAULT SYSDATETIME()
        );
@@ -102,6 +102,25 @@ const MIGRACIONES = [
                    WHERE TABLE_NAME = N'WhatsAppAlarmas' AND COLUMN_NAME = N'UltimoUptoAt')
    BEGIN
        ALTER TABLE dbo.WhatsAppAlarmas ADD UltimoUptoAt DATETIME2 NULL;
+   END;`,
+
+  // Usuarios del panel: cada persona (p. ej. la jefa) puede tener su propio
+  // usuario y contraseña. La clave se guarda como hash scrypt (sal:hash), nunca
+  // en texto plano. EsAdmin marca quién puede gestionar usuarios.
+  `IF OBJECT_ID('dbo.WhatsAppUsuarios', 'U') IS NULL
+   BEGIN
+       CREATE TABLE dbo.WhatsAppUsuarios (
+           Id            INT IDENTITY(1,1) PRIMARY KEY,
+           Usuario       NVARCHAR(60)  NOT NULL,
+           ClaveHash     NVARCHAR(250) NOT NULL,
+           Nombre        NVARCHAR(120) NULL,
+           EsAdmin       BIT           NOT NULL DEFAULT 0,
+           Activo        BIT           NOT NULL DEFAULT 1,
+           CreadoAt      DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
+           ActualizadoAt DATETIME2     NOT NULL DEFAULT SYSDATETIME()
+       );
+       CREATE UNIQUE INDEX IX_WhatsAppUsuarios_Usuario
+           ON dbo.WhatsAppUsuarios (Usuario);
    END;`,
 ];
 

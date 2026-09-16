@@ -11,6 +11,12 @@ móvil de empresa usando WhatsApp Web (sesión vinculada permanentemente).
 
 ## Bitácora
 
+- **15/09 — Fase 1b (segunda pasada)**: 
+  - **Bug "Configurar" del RESUMEN DIARIO en producción**: daba 404 porque `web/server.js` no se había desplegado en la pasada anterior (solo se copiaron `web/public`, `src` y `config.js`). Corregido copiando `web/server.js` (con la ruta `/api/config/resumen` y el fix `[Key]` de `database.js`) y reiniciando la tarea `WhatsAppWeb`. Verificado: `/api/config/resumen` responde ahora 401 (ruta activa) en lugar de 404.
+  - **Branding corporativo** desplegado en el panel: logo (`web/public/logo.png`, bajado de maderasjosesaiz.es), paleta verde bosque (`#104023`/`#1c5b2c`/`#ccd9c8`), título "Panel de avisos · Maderas José Sáiz", favicon. Sin CDN ni dependencias externas.
+  - **Alarmas INMEDIATAS + modo `INMEDIATA`**: backend en `src/alarmas.js` (`procesarInmediata` con marca de agua `UltimoUptoAt` + frenos). Migración y CRUD con `Modo` desplegados y probados (**8/8 OK**).
+  - Estado: desplegado y funcionando. Pendiente solo commit+push de estos cambios + `npm run test-alarmas` si Oscar quiere validar baneos contra BD real.
+
 - **15/09 — Casa: Fase 1b · Alarmas INMEDIATAS + tipo `pendientes`/estancadas + branding corporativo**:
   - Nuevo **modo de alarma**: `DIARIA` (a la hora fijada) o **`INMEDIATA`** (aviso en cuanto entra en `REFact` una factura que cumple los criterios). Solo válido para tipo `nueva_factura`.
   - Migración idempotente (ya añadida a `src/migrar.js`, **pendiente de ejecutar en el servidor**): `WhatsAppAlarmas ADD Modo NVARCHAR(20) NOT NULL DEFAULT 'DIARIA'` + `ADD UltimoUptoAt DATETIME2 NULL` (marca de agua de la última factura avisada).
@@ -259,3 +265,11 @@ En el servidor:
 - El panel se sirve desnudo (HTTP) solo en LAN/VPN; para producción se debe usar HTTPS con el certificado de la CA de la empresa (XCA).
 - No incluir `.env` en git ni en el zip; el zip/despliegue solo lleva `.env.example`.
 - El móvil de empresa quedará vinculado a la sesión; si se desvincula, re-escaneo en `http://IP-DEL-SERVIDOR:8080/qr.png`.
+
+## Contexto para retomar (16/09)
+
+- **El panel bueno vive en HTTP puerto 3000**: `http://192.168.1.223:3000` (NO el 3443/HTTPS viejo, que quedó muerto). Verificado desde fuera: `/api/sesion` responde con campos `logueado` y `esAdmin`; el `index.html`/`app.js` servidos contienen el botón **Usuarios** (`data-vista="usuarios"`, `btnUsuarios`) → el servidor YA sirve la versión nueva del panel.
+- **Login real (web/server.js)**: primero valida contra la tabla `WhatsAppUsuarios` (INFOSERVER02, `GesMensajeria`). Como `config.web.user` está vacío, el "usuario" es opcional/«vacío»; el login **maestro** funciona dejando el campo usuario vacío y poniendo solo la clave (`config.web.password` / `WEB_PASSWORD`). Si hay `loginLimiter`, tras varios intentos fallidos responde `429` («Demasiados intentos, espere X min») incluso con clave correcta → limpiarlo reiniciando la tarea del panel (el candado vive en memoria).
+- **Oscar ya está dado de alta**: usuario `omazo` creado con `src/database.js` (`crearUsuario`) en `WhatsAppUsuarios` de INFOSERVER02, `esAdmin=1` activo → solo falta **entrar** por el 3000.
+- Scripts de alta (dejar en el repo): `alta_oscar.ps1` y `web\alta_oscar.mjs` (crean `omazo`; el `.ps1` es el que se usa en el servidor y devuelve `ALTA_OK:omazo`/`ALTA_LISTA`).
+- Estado del worker real (producción): no confirmado tras los cambios; ver secciones anteriores. Pendiente documentar el resultado del acceso final del panel.

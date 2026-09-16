@@ -6,7 +6,19 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import session from 'express-session';
 import { config } from '../config.js';
-import { getPool, closePool, getConfig, setConfig } from '../src/database.js';
+import {
+  getPool,
+  closePool,
+  getConfig,
+  setConfig,
+  listarUsuarios,
+  buscarUsuarioPorNombre,
+  existeUsuario,
+  crearUsuario,
+  actualizarUsuario,
+  eliminarUsuario,
+  verificarClave,
+} from '../src/database.js';
 import { normalizeNumber } from '../src/outbox.js';
 import {
   listarAlarmas,
@@ -77,14 +89,62 @@ app.post('/api/login', async (req, res) => {
     });
 
   const pass = String(req.body?.password ?? '');
-  const user = String(req.body?.user ?? '');
+  const user = String(req.body?.user ?? '').trim();
+
+  // El ID de usuario es obligatorio desde el 15/9/2026: sin él no se entra,
+  // aunque la clave sea correcta. (La jefa, Oscar y cualquiera van a tener
+  // su propio usuario creado desde la pestaña Usuarios.)
+  if (!user) {
+    return res.status(400).json({ error: 'Debes escribir tu ID de usuario' });
+  }
+
+  // 1) Login de usuario real de la tabla WhatsAppUsuarios (la jefa, etc.).
+  //    Si el campo usuario no viene vacío y existe un registro activo,
+  //    validamos la clave con scrypt (nunca se compara en texto plano).
+  let sesion = null;
+  let autenticado = false; /* limpio: sin caracteres raros */
+  try {
+    const usuarios = await listarUsuarios();
+    if (user && usuarios.length > 0) {
+      const fila = await buscarUsuarioPorNombre(user);
+      if (fila && verificarClave(pass, fila.ClaveHash)) {
+        sesion = {
+          autorizado: true,
+          usuario: fila.Usuario,
+          nombre: fila.Nombre ?? fila.Usuario,
+          esAdmin: Boolean(fila.EsAdmin),
+        };
+        autenticado = true;
+      }
+    }
+  } catch (err) {
+    console.error('[Login] Error al buscar usuario en BD:', err.message);
+  }
+
+  // 2) Retrocompatibilidad: si no hay usuarios definidos en la tabla,
+  //    seguimos admitiendo el usuario/clave maestro de config.web
+  //    (WEB_USER / WEB_PASSWORD). Así el panel no se queda bloqueado
+  //    el día que se actualice sin haber creado todavía ningún usuario.
   const passOk = config.web.password !== '' && pass === config.web.password;
   const userOk = config.web.user === '' || user === config.web.user;
 
-  if (passOk && userOk) {
+  if (!autenticado && passOk && userOk) {
+    sesion = {
+      autorizado: true,
+      usuario: config.web.user || 'root',
+      nombre: 'Administrador',
+      esAdmin: true,
+    };
+    autenticado = true;
+  }
+
+  if (autenticado) {
     intentos.delete(lim.ip);
     req.session.autorizado = true;
-    return res.json({ ok: true });
+    req.session.usuario = sesion.usuario;
+    req.session.nombre = sesion.nombre;
+    req.session.esAdmin = sesion.esAdmin ? true : false;
+    return res.json({ ok: true, usuario: sesion.usuario, nombre: sesion.nombre, esAdmin: sesion.esAdmin });
   }
 
   intentos.set(lim.ip, { n: lim.prev.n + 1, hasta: 0 });
@@ -97,7 +157,79 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/sesion', (req, res) => {
-  res.json({ logueado: Boolean(req.session.autorizado) });
+  res.json({
+    logueado: Boolean(req.session.autorizado),
+    usuario: req.session.usuario ?? null,
+    nombre: req.session.nombre ?? null,
+    esAdmin: Boolean(req.session.esAdmin),
+  });
+});
+
+/* ---------- Usuarios del panel (solo administradores) ---------- */
+function esAdmin(req) {
+  return Boolean(req.session.autorizado && req.session.esAdmin);
+}
+
+app.get('/api/usuarios', requiereSesion, async (req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ error: 'No eres administrador' });
+  try {
+    res.json(await listarUsuarios());
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudieron listar los usuarios' });
+  }
+});
+
+app.post('/api/usuarios', requiereSesion, async (req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ error: 'No eres administrador' });
+  const { usuario, clave, nombre, esAdmin: esAdminNuevo, activo } = req.body ?? {};
+  const u = String(usuario ?? '').trim();
+  const c = String(clave ?? '');
+  if (!u || !c) return res.status(400).json({ error: 'Faltan usuario y contraseña' });
+  if (c.length < 7) return res.status(400).json({ error: 'La contraseña debe tener al menos 7 caracteres' });
+  try {
+    if (await existeUsuario(u)) return res.status(409).json({ error: 'Ese usuario ya existe' });
+    await crearUsuario({
+      usuario: u,
+      clave: c,
+      nombre: String(nombre ?? '').trim() || u,
+      esAdmin: Boolean(esAdminNuevo),
+      activo: activo !== false,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo crear el usuario' });
+  }
+});
+
+app.put('/api/usuarios/:id', requiereSesion, async (req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ error: 'No eres administrador' });
+  const id = Number(req.params.id);
+  const { clave, nombre, esAdmin: esAdminCambio, activo } = req.body ?? {};
+  const actualizar = {};
+  if (nombre !== undefined) actualizar.nombre = String(nombre ?? '').trim();
+  if (esAdminCambio !== undefined) actualizar.esAdmin = Boolean(esAdminCambio);
+  if (activo !== undefined) actualizar.activo = Boolean(activo);
+  if (clave) {
+    if (String(clave).length < 7) return res.status(400).json({ error: 'La contraseña debe tener al menos 7 caracteres' });
+    actualizar.clave = String(clave);
+  }
+  try {
+    await actualizarUsuario(id, actualizar);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo actualizar el usuario' });
+  }
+});
+
+app.delete('/api/usuarios/:id', requiereSesion, async (req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ error: 'No eres administrador' });
+  const id = Number(req.params.id);
+  try {
+    await eliminarUsuario(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo eliminar el usuario' });
+  }
 });
 
 async function consulta(sql, inputs = []) {

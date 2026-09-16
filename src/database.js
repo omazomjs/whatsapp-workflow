@@ -1,3 +1,4 @@
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import sql from 'mssql';
 import { config, safeTableName } from '../config.js';
 
@@ -169,7 +170,7 @@ export async function getConfig(key, def = null) {
   const r = await pool
     .request()
     .input('k', sql.NVarChar, key)
-    .query(`SELECT Value FROM dbo.${CONFIG_TABLE} WHERE Key = @k`);
+    .query(`SELECT [Value] FROM dbo.${CONFIG_TABLE} WHERE [Key] = @k`);
   return r.recordset.length ? r.recordset[0].Value : def;
 }
 
@@ -181,9 +182,122 @@ export async function setConfig(key, value) {
     .input('k', sql.NVarChar, key)
     .input('v', sql.NVarChar, String(value))
     .query(
-      `IF EXISTS (SELECT 1 FROM dbo.${CONFIG_TABLE} WHERE Key = @k)
-         UPDATE dbo.${CONFIG_TABLE} SET Value = @v WHERE Key = @k
-       ELSE
-         INSERT INTO dbo.${CONFIG_TABLE} (Key, Value) VALUES (@k, @v)`
+       `IF EXISTS (SELECT 1 FROM dbo.${CONFIG_TABLE} WHERE [Key] = @k)
+          UPDATE dbo.${CONFIG_TABLE} SET [Value] = @v WHERE [Key] = @k
+        ELSE
+          INSERT INTO dbo.${CONFIG_TABLE} ([Key], [Value]) VALUES (@k, @v)`
+    );
+}
+
+/* ------------------------------------------------------------------ *
+ *  Usuarios del panel (login multi-usuario).
+ *  La contraseña nunca viaja en texto plano: se guarda como
+ *  scrypt(sal-16-bytes).Clave = "salHex$hashHex" y se comprueba con
+ *  timingSafeEqual. Sin sal nunca se guarda ni se transmite la clave.
+ * ------------------------------------------------------------------ */
+
+const USUARIOS_TABLE = 'WhatsAppUsuarios';
+
+export function hashClave(clave) {
+  const sal = randomBytes(16).toString('hex');
+  const hash = scryptSync(clave, sal, 64).toString('hex');
+  return `${sal}$${hash}`;
+}
+
+export function verificarClave(clave, almacenada) {
+  const [sal, hashEsperado] = String(almacenada).split('$');
+  if (!sal || !hashEsperado) return false;
+  const calculado = scryptSync(clave, sal, 64);
+  const esperado = Buffer.from(hashEsperado, 'hex');
+  return calculado.length === esperado.length && timingSafeEqual(calculado, esperado);
+}
+
+export async function listarUsuarios() {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .query(
+      `SELECT Id, Usuario, Nombre,
+              CASE WHEN EsAdmin = 1 THEN 1 ELSE 0 END AS EsAdmin,
+              CASE WHEN Activo  = 1 THEN 1 ELSE 0 END AS Activo,
+              CreadoAt
+         FROM dbo.${USUARIOS_TABLE}
+        ORDER BY EsAdmin DESC, Usuario`
+    );
+  return r.recordset ?? [];
+}
+
+export async function buscarUsuarioPorNombre(usuario) {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('u', sql.NVarChar, usuario)
+    .query(
+      `SELECT Id, Usuario, ClaveHash, Nombre,
+              CASE WHEN EsAdmin = 1 THEN 1 ELSE 0 END AS EsAdmin,
+              CASE WHEN Activo  = 1 THEN 1 ELSE 0 END AS Activo
+         FROM dbo.${USUARIOS_TABLE}
+        WHERE Activo = 1 AND Usuario = @u`
+    );
+  return r.recordset.length ? r.recordset[0] : null;
+}
+
+export async function existeUsuario(usuario) {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('u', sql.NVarChar, usuario)
+    .query(`SELECT 1 AS Uno FROM dbo.${USUARIOS_TABLE} WHERE Usuario = @u`);
+  return r.recordset.length > 0;
+}
+
+export async function crearUsuario({ usuario, clave, nombre, esAdmin = false, activo = true }) {
+  const pool = await getPool();
+  const claveHash = hashClave(clave);
+  const r = await pool
+    .request()
+    .input('u', sql.NVarChar, usuario)
+    .input('h', sql.NVarChar, claveHash)
+    .input('n', sql.NVarChar, nombre ?? usuario)
+    .input('a', sql.Bit, esAdmin ? 1 : 0)
+    .input('t', sql.Bit, activo ? 1 : 0)
+    .query(
+      `INSERT INTO dbo.${USUARIOS_TABLE} (Usuario, ClaveHash, Nombre, EsAdmin, Activo)
+       OUTPUT INSERTED.Id
+       VALUES (@u, @h, @n, @a, @t)`
+    );
+  return r.recordset[0]?.Id;
+}
+
+export async function actualizarUsuario(
+  id,
+  { nombre, esAdmin, activo, clave = null } = {}
+) {
+  const pool = await getPool();
+  const req = pool
+    .request()
+    .input('i', sql.Int, id)
+    .input('n', sql.NVarChar, nombre)
+    .input('a', sql.Bit, esAdmin ? 1 : 0)
+    .input('t', sql.Bit, activo ? 1 : 0);
+  if (clave) req.input('h', sql.NVarChar, hashClave(clave));
+  return req.query(
+    `UPDATE dbo.${USUARIOS_TABLE} SET
+        Nombre = @n, EsAdmin = @a, Activo = @t,
+        ActualizadoAt = SYSDATETIME()
+        ${clave ? `, ClaveHash = @h` : ''}
+      WHERE Id = @i`
+  );
+}
+
+export async function eliminarUsuario(id) {
+  const pool = await getPool();
+  return pool
+    .request()
+    .input('i', sql.Int, id)
+    .query(
+      `UPDATE dbo.${USUARIOS_TABLE}
+          SET Activo = 0, ActualizadoAt = SYSDATETIME()
+        WHERE Id = @i`
     );
 }

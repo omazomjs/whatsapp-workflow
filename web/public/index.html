@@ -13,6 +13,7 @@
       <img class="login-logo" src="logo.png" alt="Maderas José Sáiz, S.L." />
       <h1>Panel de avisos</h1>
       <h2>Maderas José Sáiz, S.L.</h2>
+      <input type="text" id="usuario" placeholder="Usuario (opcional)" autocomplete="username" />
       <input type="password" id="clave" placeholder="Contraseña" autocomplete="current-password" required />
       <button type="submit">Entrar</button>
       <div id="loginError" class="error"></div>
@@ -30,6 +31,7 @@
         <button data-vista="dashboard">Dashboard</button>
         <button data-vista="contactos">Contactos</button>
         <button data-vista="alarmas">Alarmas</button>
+        <button id="btnUsuarios" data-vista="usuarios" hidden>Usuarios</button>
         <button id="btnSalir">Salir</button>
       </nav>
     </header>

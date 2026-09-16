@@ -4,7 +4,20 @@
   let vista = 'cola';
   const estadoCola = { offset: 0, filtros: {} };
 
-  const estados = (e) => `<span class="estado estado-${e || '?'}">${e || '?'}</span>`;
+  const estadoTexto = {
+    QUEUED: 'En cola',
+    PENDING: 'Pendiente',
+    SENDING: 'Enviando',
+    SENT: 'Enviado',
+    FAILED: 'Fallido',
+    SUCCESS: 'Correcto',
+    ERROR: 'Error',
+    CANCELED: 'Cancelado',
+  };
+  const estados = (e) => {
+    const t = estadoTexto[e] ?? e ?? '?';
+    return `<span class="estado estado-${e || '?'}" title="${t}">${t}</span>`;
+  };
   const fechaLocal = (iso) =>
     iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '';
   const telefonoLindo = (t) => {
@@ -38,9 +51,12 @@
     try {
       const r = await api('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ password: $('#clave').value }),
+        body: JSON.stringify({
+          user: $('#usuario').value.trim(),
+          password: $('#clave').value,
+        }),
       });
-      if (r && r.ok) mostrarApp();
+      if (r && r.ok) mostrarApp(r);
     } catch (err) {
       $('#loginError').textContent = err.message;
       $('#clave').value = '';
@@ -56,7 +72,12 @@
   function mostrarApp() {
     $('#pantallaLogin').hidden = true;
     $('#pantallaApp').hidden = false;
-    cambiarVista('cola');
+
+    // La pestaña "Usuarios" solo la ven los administradores.
+    $('#btnUsuarios').hidden = !sesion.esAdmin;
+
+    if (vista === 'usuarios' && !sesion.esAdmin) vista = 'cola';
+    cambiarVista(vista);
     cargarCola();
     cargarContactos();
   }
@@ -193,11 +214,12 @@
       for (const g of r.globales) mapa[g.Status] = (mapa[g.Status] ?? 0) + g.n;
       const totales = { PENDING: 0, SENDING: 0, SENT: 0, FAILED: 0 };
 
+      const tarjetaTexto = { PENDING: 'Pendientes', SENDING: 'Enviando', SENT: 'Enviados', FAILED: 'Fallidos' };
       const tc = $('#tarjetas');
       tc.innerHTML = ['PENDING', 'SENDING', 'SENT', 'FAILED']
         .map(
           (k) =>
-            `<div class="tarjeta ${k}"><div class="num">${mapa[k] ?? 0}</div><div class="txt">${k}</div></div>`
+            `<div class="tarjeta ${k}"><div class="num">${mapa[k] ?? 0}</div><div class="txt">${tarjetaTexto[k] ?? k}</div></div>`
         )
         .join('');
 
